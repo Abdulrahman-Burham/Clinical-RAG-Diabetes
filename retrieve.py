@@ -64,8 +64,8 @@ def get_embedding_function():
 
 def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
     """
-    Queries local ChromaDB collection and returns top-K evidence chunks with distance/relevance scores.
-    Includes query normalization for Arabic typos and fallback query expansion.
+    Queries local ChromaDB collection and returns top-K evidence chunks with distance scores.
+    Uses similarity_search_with_score to ensure robust top-K retrieval without dropping results.
     """
     if not os.path.exists(PERSIST_DIR):
         print(f"[Error] ChromaDB directory '{PERSIST_DIR}' does not exist. Please run 'python ingest.py' first.")
@@ -100,13 +100,13 @@ def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
     print(f"RETRIEVING TOP {top_k} MOST RELEVANT CLINICAL EVIDENCE CHUNKS...\n")
 
     if filter_dict:
-        results_with_scores = vectorstore.similarity_search_with_relevance_scores(
+        results_with_scores = vectorstore.similarity_search_with_score(
             search_query,
             k=top_k,
             filter=filter_dict
         )
     else:
-        results_with_scores = vectorstore.similarity_search_with_relevance_scores(
+        results_with_scores = vectorstore.similarity_search_with_score(
             search_query,
             k=top_k
         )
@@ -116,13 +116,13 @@ def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
         fallback_query = "مرض السكري التشخيص والعلاج والارشاد السريري" if any("\u0600" <= c <= "\u06FF" for c in query_text) else "Diabetes diagnosis management guidelines"
         print(f"[*] Retry with expanded fallback query: '{fallback_query}'")
         if filter_dict:
-            results_with_scores = vectorstore.similarity_search_with_relevance_scores(
+            results_with_scores = vectorstore.similarity_search_with_score(
                 fallback_query,
                 k=top_k,
                 filter=filter_dict
             )
         else:
-            results_with_scores = vectorstore.similarity_search_with_relevance_scores(
+            results_with_scores = vectorstore.similarity_search_with_score(
                 fallback_query,
                 k=top_k
             )
@@ -138,7 +138,7 @@ def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
         page_num = meta.get("page_number", "N/A")
         chunk_id = meta.get("chunk_id", "N/A")
 
-        print(f"--- [RESULT #{idx}] (Relevance Score: {score:.4f}) ---")
+        print(f"--- [RESULT #{idx}] (Distance Score: {score:.4f}) ---")
         print(f"[*] CITATION (Golden Rule):")
         print(f"   [Source Document: {doc_name} | Section: '{section}' | Page: {page_num} | Chunk ID: {chunk_id}]")
         print(f"[*] METADATA DETAILS:")
