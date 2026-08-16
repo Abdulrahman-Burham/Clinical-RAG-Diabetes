@@ -17,7 +17,11 @@ import pymupdf  # PyMuPDF
 from dotenv import load_dotenv
 
 from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # Load environment variables
 load_dotenv()
@@ -280,7 +284,10 @@ def store_in_chromadb(documents, persist_dir: str):
             print(f"Warning clearing persist dir: {e}")
 
     print(f"[Step 5] Initializing local ChromaDB at directory: '{persist_dir}'...")
-    from langchain_community.vectorstores import Chroma
+    try:
+        from langchain_chroma import Chroma
+    except ImportError:
+        from langchain_community.vectorstores import Chroma
 
     embedding_function = get_embedding_function()
 
