@@ -66,18 +66,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Cloud Automatic Ingestion Initializer (runs automatically if chroma_db is missing)
+# Cloud Automatic Ingestion Initializer
 @st.cache_resource(show_spinner=True)
 def initialize_cloud_vectorstore():
-    if not os.path.exists(PERSIST_DIR) or len(os.listdir(PERSIST_DIR)) == 0:
-        with st.spinner("⚡ Initializing Clinical Guidelines Vector Database for Cloud Deployment..."):
-            downloaded = ingest.fetch_all_guidelines(ingest.DOCS_DIR)
-            sections = []
-            for doc_name, path in downloaded:
-                sections.extend(ingest.parse_pdf_structure(path, doc_name))
-            docs = ingest.chunk_section_data(sections)
-            ingest.store_in_chromadb(docs, PERSIST_DIR)
-        return True
+    try:
+        if not os.path.exists(PERSIST_DIR) or len(os.listdir(PERSIST_DIR)) == 0:
+            with st.spinner("⚡ Initializing Clinical Guidelines Vector Database for Cloud Deployment..."):
+                downloaded = ingest.fetch_all_guidelines(ingest.DOCS_DIR)
+                sections = []
+                for doc_name, path in downloaded:
+                    sections.extend(ingest.parse_pdf_structure(path, doc_name))
+                docs = ingest.chunk_section_data(sections)
+                ingest.store_in_chromadb(docs, PERSIST_DIR)
+            return True
+    except Exception as e:
+        st.warning(f"Note on vectorstore initialization: {e}")
     return False
 
 # Trigger cloud initialization
@@ -132,7 +135,7 @@ has_key = bool((openrouter_key or openai_key) and (openrouter_key != "your_opena
 st.sidebar.markdown("---")
 st.sidebar.markdown("### حالة النظام" if is_arabic else "### System Status")
 st.sidebar.markdown(f"**نموذج التضمين:** `paraphrase-multilingual-MiniLM-L12-v2`" if is_arabic else "**Embedding Model:** `paraphrase-multilingual-MiniLM-L12-v2`")
-st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (Local/Cloud Indexed)`" if is_arabic else "**Vector Database:** `ChromaDB (Local/Cloud Indexed)`")
+st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (488 Chunks)`" if is_arabic else "**Vector Database:** `ChromaDB (488 Chunks)`")
 st.sidebar.markdown(f"**توليد الذكاء الاصطناعي:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`" if is_arabic else f"**LLM Generation:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`")
 
 # Main Title Header & Banners

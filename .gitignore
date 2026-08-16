@@ -1,9 +1,6 @@
 # Environment & Private Keys
 .env
 
-# Vector Database (Re-indexed automatically or cached)
-chroma_db/
-
 # Python cache & artifacts
 __pycache__/
 *.pyc
