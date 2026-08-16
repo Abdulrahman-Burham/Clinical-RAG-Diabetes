@@ -3,11 +3,12 @@ retrieve.py - Multi-Document Clinical Guidelines Vector Retrieval Pipeline
 
 Queries local ChromaDB vector store containing ingested clinical diabetes guidelines,
 enforces strict Golden Rule traceability, displays complete chunk metadata,
-and supports document-level metadata filtering.
+supports document-level metadata filtering and query normalization/expansion for Arabic typos.
 """
 
 import os
 import sys
+import re
 import argparse
 from dotenv import load_dotenv
 
@@ -24,6 +25,19 @@ load_dotenv()
 # Configuration
 PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
 COLLECTION_NAME = "diabetes_guidelines"
+
+def normalize_arabic_query(query_text: str) -> str:
+    """Normalizes common Arabic spelling typos and expands broad terms."""
+    q = query_text.strip()
+    
+    # Correct common typos
+    q = re.sub(r'\bالسسكر\b', 'السكري', q)
+    q = re.sub(r'\bسسكر\b', 'سكر', q)
+    q = re.sub(r'\bسس\b', 'س', q)
+    q = re.sub(r'[أإآ]', 'ا', q)
+    q = re.sub(r'ى\b', 'ي', q)
+    
+    return q
 
 def get_embedding_function():
     """Initializes configurable embedding provider (Multilingual HuggingFace or OpenAI)."""
@@ -51,7 +65,7 @@ def get_embedding_function():
 def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
     """
     Queries local ChromaDB collection and returns top-K evidence chunks with distance/relevance scores.
-    Optional doc_filter filters retrieval strictly to a target document_name.
+    Includes query normalization for Arabic typos and fallback query expansion.
     """
     if not os.path.exists(PERSIST_DIR):
         print(f"[Error] ChromaDB directory '{PERSIST_DIR}' does not exist. Please run 'python ingest.py' first.")
@@ -71,28 +85,47 @@ def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
     )
 
     filter_dict = {}
-    if doc_filter and doc_filter != "ALL":
+    if doc_filter and doc_filter != "ALL" and not doc_filter.startswith("All") and not doc_filter.startswith("جميع"):
         filter_dict = {"document_name": doc_filter}
+
+    # Normalize Arabic query for typos
+    search_query = normalize_arabic_query(query_text)
 
     print("\n" + "=" * 80)
     print("           MULTI-DOCUMENT CLINICAL RAG RETRIEVAL RESULTS           ")
     print("=" * 80)
-    print(f"QUERY: \"{query_text}\"")
-    if doc_filter:
+    print(f"RAW QUERY: \"{query_text}\" | SEARCH QUERY: \"{search_query}\"")
+    if filter_dict:
         print(f"FILTER: Document Name == '{doc_filter}'")
     print(f"RETRIEVING TOP {top_k} MOST RELEVANT CLINICAL EVIDENCE CHUNKS...\n")
 
     if filter_dict:
         results_with_scores = vectorstore.similarity_search_with_relevance_scores(
-            query_text,
+            search_query,
             k=top_k,
             filter=filter_dict
         )
     else:
         results_with_scores = vectorstore.similarity_search_with_relevance_scores(
-            query_text,
+            search_query,
             k=top_k
         )
+
+    # Fallback Query Expansion if 0 results returned
+    if not results_with_scores and search_query != "مرض السكري التشخيص والعلاج":
+        fallback_query = "مرض السكري التشخيص والعلاج والارشاد السريري" if any("\u0600" <= c <= "\u06FF" for c in query_text) else "Diabetes diagnosis management guidelines"
+        print(f"[*] Retry with expanded fallback query: '{fallback_query}'")
+        if filter_dict:
+            results_with_scores = vectorstore.similarity_search_with_relevance_scores(
+                fallback_query,
+                k=top_k,
+                filter=filter_dict
+            )
+        else:
+            results_with_scores = vectorstore.similarity_search_with_relevance_scores(
+                fallback_query,
+                k=top_k
+            )
 
     if not results_with_scores:
         print("[-] No matching clinical evidence chunks found.")
