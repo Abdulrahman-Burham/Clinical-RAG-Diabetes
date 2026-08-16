@@ -4,7 +4,7 @@ ingest.py - Multi-Document Clinical Guidelines Data Ingestion & Structure-Aware 
 Steps:
 1. Auto-fetch 6 open-access Clinical Diabetes Guidelines PDFs into ./guidelines_docs/.
 2. Structure-aware PDF parsing using PyMuPDF (pymupdf) to extract layout text, page numbers, and headings.
-3. Section-aware chunking (300-500 tokens, 10-15% overlap) + Noise Filtering (removing author headers/footnotes).
+3. Section-aware chunking (300-500 tokens, 10-15% overlap) + Noise & Bibliography Filtering.
 4. Strict Metadata tagging: document_name, section_title, page_number, chunk_id.
 5. Multilingual Vector embedding (Arabic & English cross-lingual RAG) and indexing into local ChromaDB folder (./chroma_db).
 """
@@ -106,19 +106,39 @@ def fetch_all_guidelines(docs_dir: str):
     print(f"[Step 1] Completed fetch. Total active PDFs: {len(downloaded_files)}/{len(GUIDELINES_CATALOG)}")
     return downloaded_files
 
-def is_noise_block(text: str) -> bool:
-    """Filters out author affiliations, publisher metadata, and non-clinical headers."""
+def is_noise_or_reference_block(text: str, section_title: str = "") -> bool:
+    """
+    Strictly filters out author affiliations, publisher metadata, headers,
+    and Bibliography/References sections.
+    """
     t_clean = text.strip()
     if len(t_clean) < 60:
         return True
-    
-    # Common author/header noise patterns
+
+    # 1. Ignore References/Bibliography sections completely
+    sec_lower = section_title.lower()
+    if any(ref_word in sec_lower for ref_word in ["reference", "bibliography", "literature cited", "endnotes"]):
+        return True
+
+    # 2. Check for bibliography citation patterns in text
+    # e.g., "1. Smith J, et al. Diabetes Care 2019;42:123-130." or "Pak J Med Sci"
+    citation_patterns = [
+        r'\b(?:10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)\b',  # DOIs
+        r'\b(?:Pak J Med Sci|Diabetes Care|Endocrinol Metab|Ups J Med Sci|Med Sci|Arch Endocrinol)\b',
+        r'^\s*\d{1,3}\.\s+[A-Z][a-z]+(?:\s+[A-Z]{1,3})?,',  # Bibliographic numbering "43. Sharma B,"
+        r'Available at https?://',
+        r'Accessed\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}'
+    ]
+    for pat in citation_patterns:
+        if re.search(pat, t_clean):
+            return True
+
+    # 3. Common author/header noise patterns
     noise_patterns = [
         r"Gabriela\s+Brenta",
         r"Cesar\s+Milstein\s+Hospital",
         r"Buenos\s+Aires",
         r"The\s+Author\(s\)\s+20\d\d",
-        r"https?://doi\.org",
         r"Warning:\s+The\s+NCBI\s+web\s+site",
         r"An\s+official\s+website\s+of\s+the\s+United\s+States",
         r"Search\s+databaseBooksAll",
@@ -127,14 +147,14 @@ def is_noise_block(text: str) -> bool:
     for pat in noise_patterns:
         if re.search(pat, t_clean, re.IGNORECASE):
             return True
-            
+
     return False
 
 def parse_pdf_structure(pdf_path: str, doc_name: str):
     """
     Step 2: Structure-Aware Parsing using PyMuPDF (pymupdf).
     Extracts text blocks page-by-page while detecting headings/sections and page numbers.
-    Returns a list of section blocks with metadata.
+    Filters out Bibliography / References sections.
     """
     doc = pymupdf.open(pdf_path)
     sections_data = []
@@ -142,7 +162,7 @@ def parse_pdf_structure(pdf_path: str, doc_name: str):
 
     # Regex heuristic for detecting section titles
     section_title_pattern = re.compile(
-        r'^(?:[0-9]{1,2}\.|\b(?:SECTION|CHAPTER|PROTOCOL|GUIDELINE|PART|STEP|ANNEX|APPENDIX|DIAGNOSIS|MANAGEMENT|TREATMENT|CRITERIA|SCREENING|MEDICATION|MONITORING|COMPLICATIONS|PREVENTION|OVERVIEW|SUMMARY|APPENDIX)\b)',
+        r'^(?:[0-9]{1,2}\.|\b(?:SECTION|CHAPTER|PROTOCOL|GUIDELINE|PART|STEP|ANNEX|APPENDIX|DIAGNOSIS|MANAGEMENT|TREATMENT|CRITERIA|SCREENING|MEDICATION|MONITORING|COMPLICATIONS|PREVENTION|OVERVIEW|SUMMARY)\b)',
         re.IGNORECASE
     )
 
@@ -177,15 +197,15 @@ def parse_pdf_structure(pdf_path: str, doc_name: str):
                     # Structure-Aware Heading Detection
                     if (avg_font_size >= 12.5 or (is_bold and len(line_str) < 80)) and len(line_str) > 3:
                         if section_title_pattern.search(line_str) or is_bold or avg_font_size >= 12.5:
-                            if not is_noise_block(line_str):
+                            if not is_noise_or_reference_block(line_str, line_str):
                                 current_section = line_str
 
                     block_lines.append(line_str)
 
                 if block_lines:
                     block_content = "\n".join(block_lines)
-                    # Filter out non-clinical noise blocks
-                    if not is_noise_block(block_content):
+                    # Filter out non-clinical noise and references
+                    if not is_noise_or_reference_block(block_content, current_section):
                         page_text_blocks.append({
                             "text": block_content,
                             "section_title": current_section,
@@ -223,13 +243,13 @@ def chunk_section_data(all_sections_data):
         page_number = item["page_number"]
         document_name = item["document_name"]
 
-        if not text.strip() or is_noise_block(text):
+        if not text.strip() or is_noise_or_reference_block(text, section_title):
             continue
 
         raw_chunks = text_splitter.split_text(text)
 
         for chunk_text in raw_chunks:
-            if is_noise_block(chunk_text):
+            if is_noise_or_reference_block(chunk_text, section_title):
                 continue
                 
             chunk_counter += 1
@@ -246,7 +266,7 @@ def chunk_section_data(all_sections_data):
             doc = Document(page_content=chunk_text, metadata=metadata)
             documents.append(doc)
 
-    print(f"[Step 3 & 4] Created {len(documents)} clean clinical chunks across all guideline documents.")
+    print(f"[Step 3 & 4] Created {len(documents)} clean clinical body chunks across all guideline documents.")
     return documents
 
 def get_embedding_function():
@@ -298,7 +318,7 @@ def store_in_chromadb(documents, persist_dir: str):
         collection_name=COLLECTION_NAME
     )
     
-    print(f"[Step 5] Ingestion Complete! Indexed {len(documents)} clean clinical chunks into ChromaDB at '{persist_dir}'.")
+    print(f"[Step 5] Ingestion Complete! Indexed {len(documents)} clean clinical body chunks into ChromaDB at '{persist_dir}'.")
     return vectorstore
 
 def main():
@@ -309,21 +329,12 @@ def main():
     # Step 1: Auto-fetch all PDFs
     downloaded_files = fetch_all_guidelines(DOCS_DIR)
 
-    # Delete old initial single PDF if exists to avoid obsolete legacy chunks
-    old_pdf = "diabetes_guidelines.pdf"
-    if os.path.exists(old_pdf):
-        try:
-            os.remove(old_pdf)
-            print(f"Removed legacy file '{old_pdf}'.")
-        except Exception:
-            pass
-
     # Step 2: Parse structure across all PDFs
     all_sections_data = []
     print(f"\n[Step 2] Performing Structure-Aware parsing across {len(downloaded_files)} PDFs...")
     for doc_name, pdf_path in downloaded_files:
         sections = parse_pdf_structure(pdf_path, doc_name)
-        print(f"  -> Extracted {len(sections)} clean text blocks from '{doc_name}'.")
+        print(f"  -> Extracted {len(sections)} clean body blocks from '{doc_name}'.")
         all_sections_data.extend(sections)
 
     # Step 3 & 4: Chunk & Tag Strict Metadata Schema
