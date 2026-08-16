@@ -11,6 +11,11 @@ import sys
 import streamlit as st
 from dotenv import load_dotenv
 
+# Top-level backend imports
+import ingest
+from retrieve import query_clinical_rag, PERSIST_DIR
+from query import generate_clinical_recommendation
+
 # Load environment variables
 load_dotenv()
 
@@ -60,14 +65,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# Imports from backend
-try:
-    from retrieve import query_clinical_rag, PERSIST_DIR
-    from query import generate_clinical_recommendation
-    import ingest
-except ImportError as e:
-    st.error(f"Failed to import backend modules: {e}")
 
 # Cloud Automatic Ingestion Initializer (runs automatically if chroma_db is missing)
 @st.cache_resource(show_spinner=True)
