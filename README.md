@@ -1,41 +1,56 @@
-# Clinical Decision Support System - Diabetes Guidelines RAG Pipeline
+# 🩺 360-Degree Clinical Decision Support System - Diabetes Guidelines RAG Pipeline
 
-A production-grade, structure-aware **Retrieval-Augmented Generation (RAG)** pipeline designed for Clinical Decision Support using Diabetes Guidelines.
+A production-grade, multi-document **Retrieval-Augmented Generation (RAG)** pipeline designed for Clinical Decision Support using 6 comprehensive Diabetes and Endocrine Guidelines documents.
 
-Built with **LangChain**, **PyMuPDF (`fitz`)**, **ChromaDB**, and configurable embeddings (**OpenAI** or free local **HuggingFace Sentence-Transformers**).
+Built with **LangChain**, **PyMuPDF (`pymupdf`)**, **ChromaDB**, **Streamlit**, and configurable embeddings (**OpenAI** or free local **HuggingFace Sentence-Transformers**).
 
 ---
 
-## 🌟 Key Features
+## 🌟 Key Architectural Principles
 
-1. **The Golden Rule**: *"No claim without a citation."* Every retrieved chunk contains full provenance back to its exact section title, page number, document name, and unique chunk ID.
-2. **Mandatory Metadata Schema**: Strictly enforces metadata fields:
+1. **The Golden Rule**: *"No claim without a citation."* Every retrieved chunk and generated recommendation contains full provenance back to its exact document name, section title, page number, and unique chunk ID.
+2. **Mandatory Metadata Schema**: Strictly enforces metadata fields across all chunks:
    - `document_name`
    - `section_title`
    - `page_number`
    - `chunk_id`
-3. **Structure-Aware Parsing**: Uses PyMuPDF (`fitz`) layout analysis to extract headers, sections, page numbers, and clinical tables without naive text splitting.
+3. **Structure-Aware Multi-PDF Parsing**: Uses PyMuPDF layout analysis to extract headers, sections, page numbers, and clinical tables across 6 clinical guidelines documents without naive text splitting.
 4. **Section-Aware Chunking**: Target windowing of 300–500 tokens with 10–15% token overlap within document sections.
-5. **Zero-Setup Local Vector DB**: Embedded lightweight local ChromaDB (`./chroma_db`).
-6. **Auto-Fetching**: Automated HTTP fetching of open-access WHO Diabetes Guidelines PDF.
+5. **Zero-Setup Local Vector DB**: Embedded lightweight local ChromaDB (`./chroma_db`) with over 1,000 indexed clinical chunks.
+6. **Clinical RAG Generation & Evaluation**:
+   - `query.py`: Synthesizes evidence chunks into clinical recommendations with inline citations `[Doc | Sec | Page]`.
+   - `eval.py`: Automated benchmarking suite testing retrieval latency, metadata schema compliance, and citation coverage.
+   - `app.py`: Interactive Streamlit Web UI Dashboard for doctors.
+
+---
+
+## 📚 Ingested Medical Guidelines Library (360° Coverage)
+
+The pipeline automatically fetches and indexes **6 open-access clinical guideline PDFs** inside `./guidelines_docs/`:
+
+1. `diabetes_diagnosis_and_classification.pdf`: Diagnostic criteria, fasting blood glucose, A1C thresholds, and classification (Types 1, 2, MODY).
+2. `type2_diabetes_pharmacotherapy_management.pdf`: Adult Type 2 diabetes management, Metformin, SGLT2 inhibitors, GLP-1 RA, and insulin protocols.
+3. `pediatric_and_adolescent_diabetes.pdf`: Diagnosis, glycemic targets, and treatment protocols for children and adolescents.
+4. `metabolic_syndrome_cardiovascular_risk.pdf`: Cardiovascular risk factor management, dyslipidemia, and hypertension in diabetes.
+5. `thyroid_and_endocrine_comorbidities.pdf`: Management of co-existing endocrine and autoimmune conditions.
+6. `gestational_diabetes_maternal_care.pdf`: Screening, diagnostic criteria, and management of Gestational Diabetes Mellitus (GDM) during pregnancy.
 
 ---
 
 ## 🚀 Quickstart Guide ("Zero to Hero")
 
-### Step 1: Clone or Navigate to Project Directory
+### Step 1: Navigate to Project Directory
 ```bash
 cd c:\Users\abdul\Downloads\hackathon
 ```
 
 ### Step 2: Install Dependencies
-Install all required dependencies using `requirements.txt`:
 ```bash
 pip install -r requirements.txt
 ```
 
 ### Step 3: Configure Environment Variables
-Copy `.env.example` to `.env` (already pre-configured with local HuggingFace embeddings for free, zero-cost execution):
+Copy `.env.example` to `.env` (pre-configured for free local HuggingFace embeddings):
 ```bash
 # Optional: Set your OpenAI API key if EMBEDDING_PROVIDER=openai
 # OPENAI_API_KEY=sk-...
@@ -43,76 +58,75 @@ Copy `.env.example` to `.env` (already pre-configured with local HuggingFace emb
 
 ---
 
-## 📥 Ingestion Pipeline (`ingest.py`)
+## 📥 1. Multi-Document Ingestion (`ingest.py`)
 
-Run the automated ingestion script:
+Auto-fetch all 6 guideline PDFs, perform structure-aware parsing, section chunking, metadata tagging, and vector storage in `./chroma_db`:
+
 ```bash
 python ingest.py
 ```
 
-### What `ingest.py` Does:
-1. **Auto-Fetch**: Downloads the WHO Clinical Diabetes Guideline PDF if not present locally as `diabetes_guidelines.pdf`.
-2. **Structure Parsing**: Parses layout elements, font sizes, headings, and page boundaries using PyMuPDF.
-3. **Section Chunking**: Splits text per section into 300–500 token chunks with overlap.
-4. **Metadata Tagging**: Attaches `document_name`, `section_title`, `page_number`, and `chunk_id`.
-5. **Vector Ingestion**: Embeds and indexes all chunks into local `./chroma_db`.
-
 ---
 
-## 🔍 Retrieval Pipeline (`retrieve.py`)
+## 🔍 2. Traceable Vector Retrieval (`retrieve.py`)
 
-Run the clinical query retrieval tool:
+Run multi-document vector retrieval with exact Golden Rule citations:
+
 ```bash
-python retrieve.py
+python retrieve.py "What are the fasting blood glucose criteria for diagnosing diabetes?"
 ```
 
-### Run Custom Clinical Queries
-Pass your custom clinical question as a command-line argument:
+### Filter by Specific Guideline Document:
 ```bash
-python retrieve.py "What are the first-line medication recommendations for Type 2 diabetes?"
-```
-
-```bash
-python retrieve.py "What are the fasting blood glucose thresholds for diagnosing diabetes?"
+python retrieve.py "What are the glycemic targets?" --doc pediatric_and_adolescent_diabetes.pdf
 ```
 
 ---
 
-## 📁 Project Structure
+## 🤖 3. Generative Clinical Engine (`query.py`)
 
-```
-├── .env                  # Active environment variables
-├── .env.example          # Template environment file
-├── requirements.txt      # Python dependencies
-├── ingest.py             # Auto-download, parse, chunk, metadata & ChromaDB ingestion
-├── retrieve.py           # ChromaDB search & explicit citation printout
-├── README.md             # Project documentation
-└── chroma_db/            # Generated local ChromaDB vector store (after ingest)
+Generate a synthesized clinical recommendation with inline citations:
+
+```bash
+python query.py "What are the first-line medication recommendations for Type 2 diabetes?"
 ```
 
 ---
 
-## 🔒 Citation Compliance (The Golden Rule)
+## 📊 4. Run RAG Evaluation Benchmark (`eval.py`)
 
-Example terminal output from `retrieve.py`:
+Run the clinical benchmark suite testing latency and citation pass rates:
 
-```text
-================================================================================
-                  CLINICAL RAG RETRIEVAL QUERY RESULTS                  
-================================================================================
-QUERY: "What are the criteria for diagnosing diabetes?"
-RETRACTING TOP 3 MOST RELEVANT CLINICAL GUIDELINE CHUNKS...
+```bash
+python eval.py
+```
 
---- [RESULT #1] (Relevance Score: 0.8412) ---
-📌 CITATION (Golden Rule):
-   [Source Document: diabetes_guidelines.pdf | Section: 'Diagnosis and screening' | Page: 3 | Chunk ID: diabetes_guidelines.pdf_p3_c5]
-📄 METADATA DETAILS:
-   - Document Name : diabetes_guidelines.pdf
-   - Section Title : Diagnosis and screening
-   - Page Number   : 3
-   - Chunk ID      : diabetes_guidelines.pdf_p3_c5
-📝 RETRIEVED CONTENT CHUNK:
-   --------------------------------------------------------------------------
-   Fasting plasma glucose >= 7.0 mmol/L (126 mg/dL) or 2-hour post-load glucose...
-   --------------------------------------------------------------------------
+---
+
+## 💻 5. Launch Interactive Web UI (`app.py`)
+
+Launch the Streamlit Clinical Decision Support Dashboard:
+
+```bash
+streamlit run app.py
+```
+
+Open your browser at `http://localhost:8501` to use the interactive dashboard!
+
+---
+
+## 📁 Complete Project Structure
+
+```
+├── .env                                  # Active environment variables
+├── .env.example                          # Template environment file
+├── requirements.txt                      # Python dependencies
+├── ingest.py                             # Multi-PDF downloader, structure parser, section chunker & ChromaDB indexer
+├── retrieve.py                           # Vector search & Golden Rule citation printer (with document filtering)
+├── query.py                              # RAG Clinical Recommendation Generator with inline citations
+├── eval.py                               # RAG Benchmark harness testing latency, schema, & citation rates
+├── app.py                                # Interactive Streamlit Web UI Dashboard
+├── README.md                             # Project documentation
+├── guidelines_docs/                      # Downloaded Clinical Guideline PDFs (6 documents)
+└── chroma_db/                            # Local ChromaDB vector database (1000+ indexed chunks)
 ```

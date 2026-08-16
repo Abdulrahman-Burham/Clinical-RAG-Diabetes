@@ -1,13 +1,14 @@
 """
-retrieve.py - Clinical Decision Support RAG Retrieval Script
+retrieve.py - Multi-Document Clinical Decision Support RAG Retrieval Script
 
-Connects to local ChromaDB, executes similarity search for clinical queries,
+Connects to local ChromaDB, executes similarity search across multi-guideline document collections,
 and formats retrieved evidence with strict citation metadata following the Golden Rule:
 "No claim without a citation."
 """
 
 import os
 import sys
+import argparse
 from dotenv import load_dotenv
 
 # Ensure stdout handles UTF-8 formatting across all platforms (Windows cp1252 fix)
@@ -45,7 +46,7 @@ def get_embedding_function():
             from langchain_community.embeddings import HuggingFaceEmbeddings
             return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-def query_clinical_rag(query_text: str, top_k: int = 3):
+def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
     """
     Connects to ChromaDB vector database and performs similarity search with full citation traceability.
     """
@@ -61,18 +62,31 @@ def query_clinical_rag(query_text: str, top_k: int = 3):
         collection_name=COLLECTION_NAME
     )
 
+    filter_dict = {}
+    if doc_filter:
+        filter_dict["document_name"] = doc_filter
+
     print("\n" + "=" * 80)
-    print("                  CLINICAL RAG RETRIEVAL QUERY RESULTS                  ")
+    print("           MULTI-DOCUMENT CLINICAL RAG RETRIEVAL RESULTS           ")
     print("=" * 80)
     print(f"QUERY: \"{query_text}\"")
-    print(f"RETRIEVING TOP {top_k} MOST RELEVANT CLINICAL GUIDELINE CHUNKS...\n")
+    if doc_filter:
+        print(f"FILTER: Document Name == '{doc_filter}'")
+    print(f"RETRIEVING TOP {top_k} MOST RELEVANT CLINICAL EVIDENCE CHUNKS...\n")
 
     # Similarity search with relevance scores
-    results_with_scores = vectorstore.similarity_search_with_relevance_scores(query_text, k=top_k)
+    if filter_dict:
+        results_with_scores = vectorstore.similarity_search_with_relevance_scores(
+            query_text, k=top_k, filter=filter_dict
+        )
+    else:
+        results_with_scores = vectorstore.similarity_search_with_relevance_scores(query_text, k=top_k)
 
     if not results_with_scores:
-        # Fallback to standard similarity search if score thresholding fails
-        results = vectorstore.similarity_search(query_text, k=top_k)
+        if filter_dict:
+            results = vectorstore.similarity_search(query_text, k=top_k, filter=filter_dict)
+        else:
+            results = vectorstore.similarity_search(query_text, k=top_k)
         results_with_scores = [(doc, 0.0) for doc in results]
 
     for idx, (doc, score) in enumerate(results_with_scores, 1):
@@ -93,7 +107,7 @@ def query_clinical_rag(query_text: str, top_k: int = 3):
         print(f"   - Section Title : {section}")
         print(f"   - Page Number   : {page_num}")
         print(f"   - Chunk ID      : {chunk_id}")
-        print(f"[*] RETRIEVED CONTENT CHUNK:")
+        print(f"[*] RETRIEVED EVIDENCE CHUNK:")
         print("   " + "-" * 74)
         for line in doc.page_content.strip().split("\n"):
             print(f"   {line}")
@@ -102,15 +116,16 @@ def query_clinical_rag(query_text: str, top_k: int = 3):
     print("=" * 80)
     print("GOLDEN RULE VERIFIED: Every retrieved chunk includes complete citation provenance.")
     print("=" * 80 + "\n")
+    return results_with_scores
 
 def main():
-    # Allow clinical query to be passed as CLI argument
-    if len(sys.argv) > 1:
-        query = " ".join(sys.argv[1:])
-    else:
-        query = "What are the criteria for diagnosing diabetes?"
-
-    query_clinical_rag(query, top_k=3)
+    parser = argparse.ArgumentParser(description="Clinical RAG Multi-Document Retrieval Tool")
+    parser.add_argument("query", nargs="?", default="What are the criteria for diagnosing diabetes?", help="Clinical query string")
+    parser.add_argument("--k", type=int, default=3, help="Number of top chunks to retrieve")
+    parser.add_argument("--doc", type=str, default=None, help="Filter search to specific document_name")
+    
+    args = parser.parse_args()
+    query_clinical_rag(args.query, top_k=args.k, doc_filter=args.doc)
 
 if __name__ == "__main__":
     main()

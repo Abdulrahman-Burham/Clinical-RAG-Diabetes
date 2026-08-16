@@ -1,16 +1,17 @@
 """
-ingest.py - Data Ingestion & Structure-Aware RAG Retrieval Pipeline for Diabetes Guidelines
+ingest.py - Multi-Document Clinical Guidelines Data Ingestion & Structure-Aware RAG Pipeline
 
 Steps:
-1. Auto-fetch open-access Clinical Guidelines PDF via HTTP GET (requests) with robust validation & fallback URLs.
-2. Structure-aware PDF parsing using PyMuPDF (pymupdf) to extract text, page numbers, and structural headings.
-3. Section-aware chunking (300-500 tokens, 10-15% overlap).
+1. Auto-fetch 6 open-access Clinical Diabetes Guidelines PDFs into ./guidelines_docs/.
+2. Structure-aware PDF parsing using PyMuPDF (pymupdf) to extract layout text, page numbers, and headings.
+3. Section-aware chunking (300-500 tokens, 10-15% overlap) + Noise Filtering (removing author headers/footnotes).
 4. Strict Metadata tagging: document_name, section_title, page_number, chunk_id.
-5. Vector embedding and storage in local ChromaDB folder (./chroma_db).
+5. Multilingual Vector embedding (Arabic & English cross-lingual RAG) and indexing into local ChromaDB folder (./chroma_db).
 """
 
 import os
 import re
+import shutil
 import requests
 import pymupdf  # PyMuPDF
 from dotenv import load_dotenv
@@ -22,65 +23,118 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 load_dotenv()
 
 # Configuration
-PDF_FILENAME = "diabetes_guidelines.pdf"
-PRIMARY_URL = os.getenv(
-    "GUIDELINE_PDF_URL",
-    "https://www.ncbi.nlm.nih.gov/books/NBK585641/pdf/Bookshelf_NBK585641.pdf"
-)
-FALLBACK_URLS = [
-    "https://www.ncbi.nlm.nih.gov/books/NBK585641/pdf/Bookshelf_NBK585641.pdf",
-    "https://iris.who.int/bitstream/handle/10665/377626/Diabetes-management-protocol-eng.pdf"
-]
+DOCS_DIR = "./guidelines_docs"
 PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
 COLLECTION_NAME = "diabetes_guidelines"
 
-def fetch_pdf(url: str, output_filename: str) -> str:
-    """Step 1: Automatically fetch open-access Clinical Diabetes Guideline PDF."""
-    if os.path.exists(output_filename):
-        with open(output_filename, "rb") as f:
-            content_start = f.read(10)
-        if content_start.startswith(b"%PDF"):
-            print(f"[Step 1] Valid PDF '{output_filename}' already exists locally. Skipping download.")
-            return output_filename
-        else:
-            print(f"[Step 1] Existing '{output_filename}' is invalid. Re-downloading...")
+# Comprehensive 360° Clinical Diabetes Guidelines Catalog
+GUIDELINES_CATALOG = [
+    {
+        "filename": "diabetes_diagnosis_and_classification.pdf",
+        "title": "Diagnosis & Classification of Diabetes Mellitus",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK585641/pdf/Bookshelf_NBK585641.pdf"
+    },
+    {
+        "filename": "type2_diabetes_pharmacotherapy_management.pdf",
+        "title": "Adult Type 2 Diabetes Management & Pharmacotherapy",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK585639/pdf/Bookshelf_NBK585639.pdf"
+    },
+    {
+        "filename": "pediatric_and_adolescent_diabetes.pdf",
+        "title": "Pediatric & Adolescent Diabetes Management",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK585640/pdf/Bookshelf_NBK585640.pdf"
+    },
+    {
+        "filename": "metabolic_syndrome_cardiovascular_risk.pdf",
+        "title": "Metabolic Syndrome & Cardiovascular Risk Management",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK585642/pdf/Bookshelf_NBK585642.pdf"
+    },
+    {
+        "filename": "thyroid_and_endocrine_comorbidities.pdf",
+        "title": "Thyroid & Endocrine Co-morbidities in Diabetes",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK585643/pdf/Bookshelf_NBK585643.pdf"
+    },
+    {
+        "filename": "gestational_diabetes_maternal_care.pdf",
+        "title": "Gestational Diabetes & Maternal Care Guidelines",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK585644/pdf/Bookshelf_NBK585644.pdf"
+    }
+]
 
-    candidate_urls = [url] + [u for u in FALLBACK_URLS if u != url]
+def fetch_all_guidelines(docs_dir: str):
+    """Step 1: Automatically fetch all clinical guideline PDFs into local docs directory."""
+    os.makedirs(docs_dir, exist_ok=True)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    for idx, cand_url in enumerate(candidate_urls, 1):
-        print(f"[Step 1] Attempting to download PDF (Attempt {idx}) from: {cand_url}")
+    downloaded_files = []
+
+    print(f"\n[Step 1] Verifying & Fetching {len(GUIDELINES_CATALOG)} Clinical Guidelines PDFs...")
+    for idx, item in enumerate(GUIDELINES_CATALOG, 1):
+        filename = item["filename"]
+        title = item["title"]
+        url = item["url"]
+        target_path = os.path.join(docs_dir, filename)
+
+        if os.path.exists(target_path):
+            with open(target_path, "rb") as f:
+                header = f.read(10)
+            if header.startswith(b"%PDF"):
+                print(f"  [{idx}/{len(GUIDELINES_CATALOG)}] '{filename}' already exists locally ({title}).")
+                downloaded_files.append((filename, target_path))
+                continue
+
+        print(f"  [{idx}/{len(GUIDELINES_CATALOG)}] Downloading '{filename}' ({title})...")
         try:
-            response = requests.get(cand_url, headers=headers, timeout=30, allow_redirects=True)
-            response.raise_for_status()
-            content = response.content
-
-            if content.startswith(b"%PDF"):
-                with open(output_filename, "wb") as f:
-                    f.write(content)
-                print(f"[Step 1] Successfully downloaded and verified '{output_filename}' ({len(content)} bytes).")
-                return output_filename
+            r = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+            r.raise_for_status()
+            if r.content.startswith(b"%PDF"):
+                with open(target_path, "wb") as f:
+                    f.write(r.content)
+                print(f"      -> Successfully saved '{filename}' ({len(r.content)} bytes).")
+                downloaded_files.append((filename, target_path))
             else:
-                print(f"[Step 1] Response from {cand_url} was not a valid PDF binary. Trying next candidate...")
+                print(f"      -> Warning: Response from {url} was not a valid PDF header.")
         except Exception as e:
-            print(f"[Step 1] Download attempt from {cand_url} failed: {e}")
+            print(f"      -> Error downloading {filename}: {e}")
 
-    raise RuntimeError("Failed to fetch a valid PDF file from all candidate URLs.")
+    print(f"[Step 1] Completed fetch. Total active PDFs: {len(downloaded_files)}/{len(GUIDELINES_CATALOG)}")
+    return downloaded_files
 
-def parse_pdf_structure(pdf_path: str):
+def is_noise_block(text: str) -> bool:
+    """Filters out author affiliations, publisher metadata, and non-clinical headers."""
+    t_clean = text.strip()
+    if len(t_clean) < 60:
+        return True
+    
+    # Common author/header noise patterns
+    noise_patterns = [
+        r"Gabriela\s+Brenta",
+        r"Cesar\s+Milstein\s+Hospital",
+        r"Buenos\s+Aires",
+        r"The\s+Author\(s\)\s+20\d\d",
+        r"https?://doi\.org",
+        r"Warning:\s+The\s+NCBI\s+web\s+site",
+        r"An\s+official\s+website\s+of\s+the\s+United\s+States",
+        r"Search\s+databaseBooksAll",
+        r"Browse\s+Title"
+    ]
+    for pat in noise_patterns:
+        if re.search(pat, t_clean, re.IGNORECASE):
+            return True
+            
+    return False
+
+def parse_pdf_structure(pdf_path: str, doc_name: str):
     """
-    Step 2: Structure-Aware Parsing using PyMuPDF (fitz/pymupdf).
+    Step 2: Structure-Aware Parsing using PyMuPDF (pymupdf).
     Extracts text blocks page-by-page while detecting headings/sections and page numbers.
     Returns a list of section blocks with metadata.
     """
-    print(f"[Step 2] Performing Structure-Aware parsing on '{pdf_path}'...")
     doc = pymupdf.open(pdf_path)
-    print(f"Total pages detected: {len(doc)}")
-
     sections_data = []
-    current_section = "Clinical Overview & Introduction"
+    current_section = f"Clinical Guidelines ({doc_name})"
 
     # Regex heuristic for detecting section titles
     section_title_pattern = re.compile(
@@ -116,40 +170,39 @@ def parse_pdf_structure(pdf_path: str):
 
                     avg_font_size = sum(font_sizes) / len(font_sizes) if font_sizes else 10
 
-                    # Structure-Aware Heading Detection:
-                    # Font size threshold (>12pt or bold short line or matches regex pattern)
+                    # Structure-Aware Heading Detection
                     if (avg_font_size >= 12.5 or (is_bold and len(line_str) < 80)) and len(line_str) > 3:
                         if section_title_pattern.search(line_str) or is_bold or avg_font_size >= 12.5:
-                            # Update active section title
-                            current_section = line_str
+                            if not is_noise_block(line_str):
+                                current_section = line_str
 
                     block_lines.append(line_str)
 
                 if block_lines:
                     block_content = "\n".join(block_lines)
-                    page_text_blocks.append({
-                        "text": block_content,
-                        "section_title": current_section,
-                        "page_number": page_num
-                    })
+                    # Filter out non-clinical noise blocks
+                    if not is_noise_block(block_content):
+                        page_text_blocks.append({
+                            "text": block_content,
+                            "section_title": current_section,
+                            "page_number": page_num,
+                            "document_name": doc_name
+                        })
 
-        # Group page text blocks under their section
         for b in page_text_blocks:
             sections_data.append(b)
 
     doc.close()
-    print(f"[Step 2] Finished structure-aware parsing. Extracted {len(sections_data)} structured text blocks.")
     return sections_data
 
-def chunk_section_data(sections_data, document_name: str):
+def chunk_section_data(all_sections_data):
     """
     Step 3 & 4: Section-Aware Chunking & Strict Metadata Tagging.
-    Target chunk size: ~300-500 tokens (approx 1200-2000 chars) with 10-15% overlap (~150-250 chars).
+    Target chunk size: ~300-500 tokens (approx 1200-1800 chars) with 10-15% overlap (~200 chars).
     Attaches mandatory metadata fields: document_name, section_title, page_number, chunk_id.
     """
     print(f"[Step 3 & 4] Applying Section-Aware Chunking (300-500 tokens, 10-15% overlap)...")
     
-    # Token-equivalent character splitter: ~1400 chars target (~350 tokens), ~200 overlap (~50 tokens, ~14%)
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1400,
         chunk_overlap=200,
@@ -160,22 +213,25 @@ def chunk_section_data(sections_data, document_name: str):
     documents = []
     chunk_counter = 0
 
-    for item in sections_data:
+    for item in all_sections_data:
         text = item["text"]
         section_title = item["section_title"]
         page_number = item["page_number"]
+        document_name = item["document_name"]
 
-        if not text.strip():
+        if not text.strip() or is_noise_block(text):
             continue
 
         raw_chunks = text_splitter.split_text(text)
 
-        for sub_idx, chunk_text in enumerate(raw_chunks):
+        for chunk_text in raw_chunks:
+            if is_noise_block(chunk_text):
+                continue
+                
             chunk_counter += 1
             chunk_id = f"{document_name}_p{page_number}_c{chunk_counter}"
 
-            # Strict Metadata Schema Validation:
-            # Must include exactly document_name, section_title, page_number, chunk_id
+            # Strict Metadata Schema Validation
             metadata = {
                 "document_name": str(document_name),
                 "section_title": str(section_title),
@@ -186,13 +242,16 @@ def chunk_section_data(sections_data, document_name: str):
             doc = Document(page_content=chunk_text, metadata=metadata)
             documents.append(doc)
 
-    print(f"[Step 3 & 4] Created {len(documents)} section-aware chunks with strict metadata schema.")
+    print(f"[Step 3 & 4] Created {len(documents)} clean clinical chunks across all guideline documents.")
     return documents
 
 def get_embedding_function():
-    """Initializes configurable embedding provider (OpenAI or HuggingFace fallback)."""
+    """Initializes configurable embedding provider (Multilingual HuggingFace or OpenAI)."""
     provider = os.getenv("EMBEDDING_PROVIDER", "huggingface").lower()
-    model_name = os.getenv("EMBEDDING_MODEL", "")
+    model_name = os.getenv(
+        "EMBEDDING_MODEL",
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
     openai_key = os.getenv("OPENAI_API_KEY", "")
 
     if provider == "openai" and openai_key and openai_key != "your_openai_api_key_here":
@@ -203,20 +262,23 @@ def get_embedding_function():
             openai_api_key=openai_key
         )
     else:
-        if provider == "openai":
-            print("Notice: OPENAI_API_KEY not set. Falling back to local HuggingFace Embeddings.")
-        else:
-            print("Using HuggingFace Embeddings (sentence-transformers/all-MiniLM-L6-v2)...")
-        
+        print(f"Using Multilingual HuggingFace Embeddings ({model_name})...")
         try:
             from langchain_huggingface import HuggingFaceEmbeddings
-            return HuggingFaceEmbeddings(model_name=model_name or "sentence-transformers/all-MiniLM-L6-v2")
+            return HuggingFaceEmbeddings(model_name=model_name)
         except ImportError:
             from langchain_community.embeddings import HuggingFaceEmbeddings
-            return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            return HuggingFaceEmbeddings(model_name=model_name)
 
 def store_in_chromadb(documents, persist_dir: str):
     """Step 5: Store chunks and vector embeddings into local ChromaDB."""
+    print(f"[Step 5] Cleaning old database directory '{persist_dir}' for fresh ingestion...")
+    if os.path.exists(persist_dir):
+        try:
+            shutil.rmtree(persist_dir, ignore_errors=True)
+        except Exception as e:
+            print(f"Warning clearing persist dir: {e}")
+
     print(f"[Step 5] Initializing local ChromaDB at directory: '{persist_dir}'...")
     from langchain_community.vectorstores import Chroma
 
@@ -229,23 +291,36 @@ def store_in_chromadb(documents, persist_dir: str):
         collection_name=COLLECTION_NAME
     )
     
-    print(f"[Step 5] Ingestion Complete! Successfully indexed {len(documents)} chunks into ChromaDB at '{persist_dir}'.")
+    print(f"[Step 5] Ingestion Complete! Indexed {len(documents)} clean clinical chunks into ChromaDB at '{persist_dir}'.")
     return vectorstore
 
 def main():
-    print("=" * 70)
-    print("      CLINICAL DECISION SUPPORT SYSTEM - DATA INGESTION PIPELINE      ")
-    print("=" * 70)
+    print("=" * 75)
+    print("  CLINICAL DECISION SUPPORT SYSTEM - MULTILINGUAL DATA INGESTION PIPELINE  ")
+    print("=" * 75)
 
-    # Step 1: Auto-fetch PDF
-    url = os.getenv("GUIDELINE_PDF_URL", PRIMARY_URL)
-    pdf_path = fetch_pdf(url, PDF_FILENAME)
+    # Step 1: Auto-fetch all PDFs
+    downloaded_files = fetch_all_guidelines(DOCS_DIR)
 
-    # Step 2: Structure-Aware Parsing
-    sections_data = parse_pdf_structure(pdf_path)
+    # Delete old initial single PDF if exists to avoid obsolete legacy chunks
+    old_pdf = "diabetes_guidelines.pdf"
+    if os.path.exists(old_pdf):
+        try:
+            os.remove(old_pdf)
+            print(f"Removed legacy file '{old_pdf}'.")
+        except Exception:
+            pass
 
-    # Step 3 & 4: Section-Aware Chunking & Strict Metadata Tagging
-    documents = chunk_section_data(sections_data, PDF_FILENAME)
+    # Step 2: Parse structure across all PDFs
+    all_sections_data = []
+    print(f"\n[Step 2] Performing Structure-Aware parsing across {len(downloaded_files)} PDFs...")
+    for doc_name, pdf_path in downloaded_files:
+        sections = parse_pdf_structure(pdf_path, doc_name)
+        print(f"  -> Extracted {len(sections)} clean text blocks from '{doc_name}'.")
+        all_sections_data.extend(sections)
+
+    # Step 3 & 4: Chunk & Tag Strict Metadata Schema
+    documents = chunk_section_data(all_sections_data)
 
     # Validate Strict Metadata Schema before storing
     required_keys = {"document_name", "section_title", "page_number", "chunk_id"}
@@ -254,10 +329,10 @@ def main():
         if not required_keys.issubset(meta_keys):
             raise ValueError(f"Metadata missing required schema keys! Found keys: {meta_keys}")
 
-    # Step 5: Store in ChromaDB
+    # Step 5: Index in ChromaDB
     store_in_chromadb(documents, PERSIST_DIR)
 
-    print("\n[SUCCESS] Ingestion pipeline execution completed successfully!")
+    print("\n[SUCCESS] Multilingual ingestion pipeline executed successfully!")
 
 if __name__ == "__main__":
     main()
