@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 # Top-level backend imports
 import ingest
 from retrieve import query_clinical_rag, PERSIST_DIR
-from query import generate_clinical_recommendation
+from query import generate_clinical_recommendation, is_conversational_query
 
 # Load environment variables
 load_dotenv()
@@ -188,58 +188,64 @@ if st.button(btn_label, type="primary"):
     else:
         doc_filter = None if (selected_doc.startswith("All") or selected_doc.startswith("جميع")) else selected_doc
 
-        spinner_msg = "جاري البحث في الدلائل الطبية وتوليد التوصية بواسطة الذكاء الاصطناعي..." if is_arabic else "Searching multi-document vector index & synthesizing evidence..."
-        with st.spinner(spinner_msg):
-            results_with_scores = query_clinical_rag(user_query, top_k=top_k_chunks, doc_filter=doc_filter)
+        # Check intent first
+        if is_conversational_query(user_query):
             synthesis_text = generate_clinical_recommendation(user_query, top_k=top_k_chunks, doc_filter=doc_filter, lang="ar" if is_arabic else "en")
-
-        if not results_with_scores:
-            st.warning("لم يتم العثور على مقاطع سريرية مطابقة." if is_arabic else "No relevant evidence chunks found for this query.")
+            st.markdown("### 🤖 تعريف النظام" if is_arabic else "### 🤖 System Identity")
+            st.info(synthesis_text)
         else:
-            st.markdown("### 📋 التوصية السريرية الموثقة" if is_arabic else "### 📋 Synthesized Clinical Recommendation")
-            
-            citations_list = []
-            for idx, (doc, score) in enumerate(results_with_scores, 1):
-                meta = doc.metadata
-                dname = meta.get("document_name", "UNKNOWN")
-                sec = meta.get("section_title", "N/A")
-                page = meta.get("page_number", "N/A")
-                if is_arabic:
-                    citations_list.append(f"مرجع-{idx}: المستند '{dname}' | الصفحة {page} | القسم '{sec}'")
-                else:
-                    citations_list.append(f"Ref-{idx}: {dname}, Page {page}, Section '{sec}'")
+            spinner_msg = "جاري البحث في الدلائل الطبية وتوليد التوصية بواسطة الذكاء الاصطناعي..." if is_arabic else "Searching multi-document vector index & synthesizing evidence..."
+            with st.spinner(spinner_msg):
+                results_with_scores = query_clinical_rag(user_query, top_k=top_k_chunks, doc_filter=doc_filter)
+                synthesis_text = generate_clinical_recommendation(user_query, top_k=top_k_chunks, doc_filter=doc_filter, lang="ar" if is_arabic else "en")
 
-            # High-contrast container for synthesized text
-            with st.container():
-                st.info(synthesis_text)
+            if not results_with_scores:
+                st.warning("لم يتم العثور على مقاطع سريرية مطابقة." if is_arabic else "No relevant evidence chunks found for this query.")
+            else:
+                st.markdown("### 📋 التوصية السريرية الموثقة" if is_arabic else "### 📋 Synthesized Clinical Recommendation")
+                
+                citations_list = []
+                for idx, (doc, score) in enumerate(results_with_scores, 1):
+                    meta = doc.metadata
+                    dname = meta.get("document_name", "UNKNOWN")
+                    sec = meta.get("section_title", "N/A")
+                    page = meta.get("page_number", "N/A")
+                    if is_arabic:
+                        citations_list.append(f"مرجع-{idx}: المستند '{dname}' | الصفحة {page} | القسم '{sec}'")
+                    else:
+                        citations_list.append(f"Ref-{idx}: {dname}, Page {page}, Section '{sec}'")
 
-            # Display Evidence Chunks with Badges
-            st.markdown("### 🔍 المقاطع السريرية والمراجع الدقيقة" if is_arabic else "### 🔍 Retrieved Evidence Chunks & Citations")
+                # High-contrast container for synthesized text
+                with st.container():
+                    st.info(synthesis_text)
 
-            for idx, (doc, score) in enumerate(results_with_scores, 1):
-                meta = doc.metadata
-                dname = meta.get("document_name", "UNKNOWN")
-                sec = meta.get("section_title", "N/A")
-                page = meta.get("page_number", "N/A")
-                chunk_id = meta.get("chunk_id", "N/A")
+                # Display Evidence Chunks with Badges
+                st.markdown("### 🔍 المقاطع السريرية والمراجع الدقيقة" if is_arabic else "### 🔍 Retrieved Evidence Chunks & Citations")
 
-                expander_label = f"مرجع #{idx}: {dname} (الصفحة {page}) - القسم: {sec}" if is_arabic else f"Reference #{idx}: {dname} (Page {page}) - Section: {sec}"
+                for idx, (doc, score) in enumerate(results_with_scores, 1):
+                    meta = doc.metadata
+                    dname = meta.get("document_name", "UNKNOWN")
+                    sec = meta.get("section_title", "N/A")
+                    page = meta.get("page_number", "N/A")
+                    chunk_id = meta.get("chunk_id", "N/A")
 
-                with st.expander(expander_label, expanded=(idx == 1)):
-                    st.markdown(f"**📄 Document:** `{dname}` | **📖 Page:** `{page}` | **🔖 Section:** `{sec}`")
-                    st.markdown(f"**Chunk ID:** `{chunk_id}`")
-                    st.code(doc.page_content.strip(), language="text")
+                    expander_label = f"مرجع #{idx}: {dname} (الصفحة {page}) - القسم: {sec}" if is_arabic else f"Reference #{idx}: {dname} (Page {page}) - Section: {sec}"
 
-            # Report Download
-            report_title = "تقرير دعم القرار السريري - Clinical Decision Support Report"
-            report_content = f"{report_title}\nQuery/السؤال: {user_query}\n\n{synthesis_text}\n\nالمراجع والدلائل السريرية / Evidence Sources:\n" + "\n".join([f"- {c}" for c in citations_list])
-            
-            st.download_button(
-                label="📥 تحميل التقرير السريري (TXT)" if is_arabic else "📥 Download Clinical Report",
-                data=report_content,
-                file_name="clinical_decision_report.txt",
-                mime="text/plain"
-            )
+                    with st.expander(expander_label, expanded=(idx == 1)):
+                        st.markdown(f"**📄 Document:** `{dname}` | **📖 Page:** `{page}` | **🔖 Section:** `{sec}`")
+                        st.markdown(f"**Chunk ID:** `{chunk_id}`")
+                        st.code(doc.page_content.strip(), language="text")
+
+                # Report Download
+                report_title = "تقرير دعم القرار السريري - Clinical Decision Support Report"
+                report_content = f"{report_title}\nQuery/السؤال: {user_query}\n\n{synthesis_text}\n\nالمراجع والدلائل السريرية / Evidence Sources:\n" + "\n".join([f"- {c}" for c in citations_list])
+                
+                st.download_button(
+                    label="📥 تحميل التقرير السريري (TXT)" if is_arabic else "📥 Download Clinical Report",
+                    data=report_content,
+                    file_name="clinical_decision_report.txt",
+                    mime="text/plain"
+                )
 
 st.markdown("---")
 footer_text = "نظام دعم القرار السريري لمرض السكري | مجهّز بواسطة OpenRouter (GPT-4o-Mini), LangChain & ChromaDB" if is_arabic else "Clinical Decision Support System RAG Pipeline | Powered by OpenRouter (GPT-4o-Mini), LangChain & ChromaDB"
