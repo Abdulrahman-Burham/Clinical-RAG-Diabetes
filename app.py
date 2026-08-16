@@ -66,7 +66,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Cloud Automatic Ingestion Initializer
+# Cloud Automatic Ingestion Initializer (runs native Linux build if missing/corrupt)
 @st.cache_resource(show_spinner=True)
 def initialize_cloud_vectorstore():
     try:
@@ -80,7 +80,7 @@ def initialize_cloud_vectorstore():
                 ingest.store_in_chromadb(docs, PERSIST_DIR)
             return True
     except Exception as e:
-        st.warning(f"Note on vectorstore initialization: {e}")
+        print(f"Warning during cloud vectorstore init: {e}")
     return False
 
 # Trigger cloud initialization
@@ -135,7 +135,7 @@ has_key = bool((openrouter_key or openai_key) and (openrouter_key != "your_opena
 st.sidebar.markdown("---")
 st.sidebar.markdown("### حالة النظام" if is_arabic else "### System Status")
 st.sidebar.markdown(f"**نموذج التضمين:** `paraphrase-multilingual-MiniLM-L12-v2`" if is_arabic else "**Embedding Model:** `paraphrase-multilingual-MiniLM-L12-v2`")
-st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (488 Chunks)`" if is_arabic else "**Vector Database:** `ChromaDB (488 Chunks)`")
+st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (Native Linux)`" if is_arabic else "**Vector Database:** `ChromaDB (Native Linux)`")
 st.sidebar.markdown(f"**توليد الذكاء الاصطناعي:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`" if is_arabic else f"**LLM Generation:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`")
 
 # Main Title Header & Banners
@@ -196,7 +196,14 @@ if st.button(btn_label, type="primary"):
         else:
             spinner_msg = "جاري البحث في الدلائل الطبية وتوليد التوصية بواسطة الذكاء الاصطناعي..." if is_arabic else "Searching multi-document vector index & synthesizing evidence..."
             with st.spinner(spinner_msg):
-                results_with_scores = query_clinical_rag(user_query, top_k=top_k_chunks, doc_filter=doc_filter)
+                try:
+                    results_with_scores = query_clinical_rag(user_query, top_k=top_k_chunks, doc_filter=doc_filter)
+                except Exception as e:
+                    print(f"ChromaDB query retry: {e}")
+                    # Re-initialize native Linux build if vectorstore was corrupted
+                    ingest.main()
+                    results_with_scores = query_clinical_rag(user_query, top_k=top_k_chunks, doc_filter=doc_filter)
+
                 synthesis_text = generate_clinical_recommendation(user_query, top_k=top_k_chunks, doc_filter=doc_filter, lang="ar" if is_arabic else "en")
 
             if not results_with_scores:

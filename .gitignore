@@ -1,6 +1,9 @@
 # Environment & Private Keys
 .env
 
+# Local Chroma Database (Built dynamically on Cloud / Local startup)
+chroma_db/
+
 # Python cache & artifacts
 __pycache__/
 *.pyc
