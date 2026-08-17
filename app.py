@@ -103,6 +103,7 @@ st.sidebar.title("إعدادات النظام" if is_arabic else "Clinical Setti
 if is_arabic:
     DOCUMENT_OPTIONS = [
         "جميع المراجع السريرية (بحث شامل 360°)",
+        "who_definition_and_diagnosis_of_diabetes.pdf",
         "diabetes_diagnosis_and_classification.pdf",
         "type2_diabetes_pharmacotherapy_management.pdf",
         "pediatric_and_adolescent_diabetes.pdf",
@@ -113,6 +114,7 @@ if is_arabic:
 else:
     DOCUMENT_OPTIONS = [
         "All Clinical Guidelines (360° Search)",
+        "who_definition_and_diagnosis_of_diabetes.pdf",
         "diabetes_diagnosis_and_classification.pdf",
         "type2_diabetes_pharmacotherapy_management.pdf",
         "pediatric_and_adolescent_diabetes.pdf",
@@ -135,7 +137,7 @@ has_key = bool((openrouter_key or openai_key) and (openrouter_key != "your_opena
 st.sidebar.markdown("---")
 st.sidebar.markdown("### حالة النظام" if is_arabic else "### System Status")
 st.sidebar.markdown(f"**نموذج التضمين:** `paraphrase-multilingual-MiniLM-L12-v2`" if is_arabic else "**Embedding Model:** `paraphrase-multilingual-MiniLM-L12-v2`")
-st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (Native Linux)`" if is_arabic else "**Vector Database:** `ChromaDB (Native Linux)`")
+st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (7 Clinical Guidelines)`" if is_arabic else "**Vector Database:** `ChromaDB (7 Clinical Guidelines)`")
 st.sidebar.markdown(f"**توليد الذكاء الاصطناعي:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`" if is_arabic else f"**LLM Generation:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`")
 
 # Main Title Header & Banners

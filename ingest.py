@@ -2,7 +2,7 @@
 ingest.py - Multi-Document Clinical Guidelines Data Ingestion & Structure-Aware RAG Pipeline
 
 Steps:
-1. Auto-fetch 6 open-access Clinical Diabetes Guidelines PDFs into ./guidelines_docs/.
+1. Auto-fetch 7 open-access Clinical Diabetes Guidelines PDFs into ./guidelines_docs/.
 2. Structure-aware PDF parsing using PyMuPDF (pymupdf) to extract layout text, page numbers, and headings.
 3. Section-aware chunking (300-500 tokens, 10-15% overlap) + Noise & Bibliography Filtering.
 4. Strict Metadata tagging: document_name, section_title, page_number, chunk_id.
@@ -33,6 +33,11 @@ COLLECTION_NAME = "diabetes_guidelines"
 
 # Comprehensive 360° Clinical Diabetes Guidelines Catalog
 GUIDELINES_CATALOG = [
+    {
+        "filename": "who_definition_and_diagnosis_of_diabetes.pdf",
+        "title": "WHO Guidelines: Definition and Diagnosis of Diabetes Mellitus and Intermediate Hyperglycaemia",
+        "url": "local"
+    },
     {
         "filename": "diabetes_diagnosis_and_classification.pdf",
         "title": "Diagnosis & Classification of Diabetes Mellitus",
@@ -89,6 +94,10 @@ def fetch_all_guidelines(docs_dir: str):
                 downloaded_files.append((filename, target_path))
                 continue
 
+        if url == "local":
+            print(f"  [{idx}/{len(GUIDELINES_CATALOG)}] Skipping remote download for local file '{filename}'.")
+            continue
+
         print(f"  [{idx}/{len(GUIDELINES_CATALOG)}] Downloading '{filename}' ({title})...")
         try:
             r = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
@@ -121,7 +130,6 @@ def is_noise_or_reference_block(text: str, section_title: str = "") -> bool:
         return True
 
     # 2. Check for bibliography citation patterns in text
-    # e.g., "1. Smith J, et al. Diabetes Care 2019;42:123-130." or "Pak J Med Sci"
     citation_patterns = [
         r'\b(?:10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)\b',  # DOIs
         r'\b(?:Pak J Med Sci|Diabetes Care|Endocrinol Metab|Ups J Med Sci|Med Sci|Arch Endocrinol)\b',
@@ -162,7 +170,7 @@ def parse_pdf_structure(pdf_path: str, doc_name: str):
 
     # Regex heuristic for detecting section titles
     section_title_pattern = re.compile(
-        r'^(?:[0-9]{1,2}\.|\b(?:SECTION|CHAPTER|PROTOCOL|GUIDELINE|PART|STEP|ANNEX|APPENDIX|DIAGNOSIS|MANAGEMENT|TREATMENT|CRITERIA|SCREENING|MEDICATION|MONITORING|COMPLICATIONS|PREVENTION|OVERVIEW|SUMMARY)\b)',
+        r'^(?:[0-9]{1,2}\.|\b(?:SECTION|CHAPTER|PROTOCOL|GUIDELINE|PART|STEP|ANNEX|APPENDIX|DIAGNOSIS|MANAGEMENT|TREATMENT|CRITERIA|SCREENING|MEDICATION|MONITORING|COMPLICATIONS|PREVENTION|OVERVIEW|SUMMARY|RECOMMENDATION|ISSUE)\b)',
         re.IGNORECASE
     )
 
