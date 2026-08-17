@@ -66,12 +66,28 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Cloud Automatic Ingestion Initializer (runs native Linux build if missing/corrupt)
+# Cloud Automatic Ingestion Initializer (runs native Linux build if missing/outdated)
 @st.cache_resource(show_spinner=True)
 def initialize_cloud_vectorstore():
     try:
+        need_rebuild = False
         if not os.path.exists(PERSIST_DIR) or len(os.listdir(PERSIST_DIR)) == 0:
-            with st.spinner("⚡ Initializing Clinical Guidelines Vector Database for Cloud Deployment..."):
+            need_rebuild = True
+        else:
+            # Check if WHO document exists in current index
+            try:
+                test_results = query_clinical_rag(
+                    "WHO diagnostic criteria for diabetes",
+                    top_k=1,
+                    doc_filter="who_definition_and_diagnosis_of_diabetes.pdf"
+                )
+                if not test_results:
+                    need_rebuild = True
+            except Exception:
+                need_rebuild = True
+
+        if need_rebuild:
+            with st.spinner("⚡ Re-indexing 7 Clinical Diabetes Guidelines (including WHO Technical Report)..."):
                 downloaded = ingest.fetch_all_guidelines(ingest.DOCS_DIR)
                 sections = []
                 for doc_name, path in downloaded:
@@ -137,7 +153,7 @@ has_key = bool((openrouter_key or openai_key) and (openrouter_key != "your_opena
 st.sidebar.markdown("---")
 st.sidebar.markdown("### حالة النظام" if is_arabic else "### System Status")
 st.sidebar.markdown(f"**نموذج التضمين:** `paraphrase-multilingual-MiniLM-L12-v2`" if is_arabic else "**Embedding Model:** `paraphrase-multilingual-MiniLM-L12-v2`")
-st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (7 Clinical Guidelines)`" if is_arabic else "**Vector Database:** `ChromaDB (7 Clinical Guidelines)`")
+st.sidebar.markdown(f"**قاعدة البيانات المتجهة:** `ChromaDB (528 Chunks - 7 Guidelines)`" if is_arabic else "**Vector Database:** `ChromaDB (528 Chunks - 7 Guidelines)`")
 st.sidebar.markdown(f"**توليد الذكاء الاصطناعي:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`" if is_arabic else f"**LLM Generation:** `{'OpenRouter (openai/gpt-4o-mini)' if has_key else 'Deterministic Synthesizer'}`")
 
 # Main Title Header & Banners
