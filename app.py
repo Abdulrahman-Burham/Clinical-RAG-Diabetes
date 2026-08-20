@@ -103,10 +103,16 @@ def initialize_cloud_vectorstore():
 initialize_cloud_vectorstore()
 
 # Read Secrets if deployed on Streamlit Cloud
-if "OPENROUTER_API_KEY" in st.secrets:
-    os.environ["OPENROUTER_API_KEY"] = st.secrets["OPENROUTER_API_KEY"]
-if "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+try:
+    if hasattr(st, "secrets") and st.secrets:
+        if "OPENROUTER_API_KEY" in st.secrets:
+            os.environ["OPENROUTER_API_KEY"] = st.secrets["OPENROUTER_API_KEY"]
+        if "OPENAI_API_KEY" in st.secrets:
+            os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+        if "COHERE_API_KEY" in st.secrets:
+            os.environ["COHERE_API_KEY"] = st.secrets["COHERE_API_KEY"]
+except Exception:
+    pass
 
 # Sidebar Language Selector
 st.sidebar.image("https://img.icons8.com/color/96/000000/doctor-female.png", width=70)
@@ -115,10 +121,13 @@ is_arabic = "العربية" in language
 
 st.sidebar.title("إعدادات النظام" if is_arabic else "Clinical Settings")
 
-# Document Selector
+# Document Selector (All 10 Guidelines)
 if is_arabic:
     DOCUMENT_OPTIONS = [
         "جميع المراجع السريرية (بحث شامل 360°)",
+        "who_hearts_diagnosis_and_management_t2d.pdf",
+        "who_idf_screening_for_type_2_diabetes.pdf",
+        "who_definition_and_diagnosis_of_diabetes_summary.pdf",
         "who_definition_and_diagnosis_of_diabetes.pdf",
         "diabetes_diagnosis_and_classification.pdf",
         "type2_diabetes_pharmacotherapy_management.pdf",
@@ -130,6 +139,9 @@ if is_arabic:
 else:
     DOCUMENT_OPTIONS = [
         "All Clinical Guidelines (360° Search)",
+        "who_hearts_diagnosis_and_management_t2d.pdf",
+        "who_idf_screening_for_type_2_diabetes.pdf",
+        "who_definition_and_diagnosis_of_diabetes_summary.pdf",
         "who_definition_and_diagnosis_of_diabetes.pdf",
         "diabetes_diagnosis_and_classification.pdf",
         "type2_diabetes_pharmacotherapy_management.pdf",

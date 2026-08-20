@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import requests
+from pathlib import Path
 import pymupdf  # PyMuPDF
 from dotenv import load_dotenv
 
@@ -36,6 +37,21 @@ GUIDELINES_CATALOG = [
     {
         "filename": "who_definition_and_diagnosis_of_diabetes.pdf",
         "title": "WHO Guidelines: Definition and Diagnosis of Diabetes Mellitus and Intermediate Hyperglycaemia",
+        "url": "local"
+    },
+    {
+        "filename": "who_hearts_diagnosis_and_management_t2d.pdf",
+        "title": "WHO HEARTS Package: Diagnosis and Management of Type 2 Diabetes in Primary Health Care",
+        "url": "local"
+    },
+    {
+        "filename": "who_idf_screening_for_type_2_diabetes.pdf",
+        "title": "WHO/IDF Guidelines: Screening for Type 2 Diabetes Report",
+        "url": "local"
+    },
+    {
+        "filename": "who_definition_and_diagnosis_of_diabetes_summary.pdf",
+        "title": "WHO Guidelines: Definition & Diagnosis Criteria Summary",
         "url": "local"
     },
     {
@@ -227,6 +243,37 @@ def parse_pdf_structure(pdf_path: str, doc_name: str):
     doc.close()
     return sections_data
 
+def load_pdfs(data_dir=None):
+    """
+    Notebook compatibility loader: Loads PDF documents page by page,
+    normalizes metadata with 'document_name', 1-indexed 'page_number', and 'page'.
+    """
+    if data_dir is None:
+        import config
+        data_dir = config.DATA_DIR
+    
+    docs_path = Path(data_dir)
+    pdf_files = sorted(list(docs_path.glob("*.pdf")))
+    
+    try:
+        from langchain_community.document_loaders import PyPDFLoader
+    except ImportError:
+        from langchain.document_loaders import PyPDFLoader
+
+    all_pages = []
+    for pdf_file in pdf_files:
+        doc_name = pdf_file.name
+        loader = PyPDFLoader(str(pdf_file))
+        pages = loader.load()
+        for idx, page in enumerate(pages):
+            page.metadata["document_name"] = doc_name
+            page.metadata["page_number"] = idx + 1  # 1-indexed
+            page.metadata["page"] = idx             # 0-indexed
+            page.metadata["source"] = str(pdf_file)
+            all_pages.append(page)
+
+    return all_pages
+
 def chunk_section_data(all_sections_data):
     """
     Step 3 & 4: Section-Aware Chunking & Strict Metadata Tagging.
@@ -277,6 +324,37 @@ def chunk_section_data(all_sections_data):
     print(f"[Step 3 & 4] Created {len(documents)} clean clinical body chunks across all guideline documents.")
     return documents
 
+def chunk_documents(pages_or_docs, chunk_size=None, chunk_overlap=None):
+    """
+    Notebook compatibility chunker: Applies section-aware splitting and metadata tagging.
+    """
+    if pages_or_docs and isinstance(pages_or_docs[0], dict):
+        return chunk_section_data(pages_or_docs)
+
+    import config
+    c_size = (chunk_size if chunk_size is not None else config.CHUNK_SIZE) * 4
+    c_overlap = (chunk_overlap if chunk_overlap is not None else config.CHUNK_OVERLAP) * 4
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=c_size,
+        chunk_overlap=c_overlap,
+        separators=["\n\n", "\n", ". ", " ", ""]
+    )
+
+    chunks = text_splitter.split_documents(pages_or_docs)
+    chunk_counter = 0
+    for chunk in chunks:
+        chunk_counter += 1
+        doc_name = chunk.metadata.get("document_name", "document.pdf")
+        page_num = chunk.metadata.get("page_number", chunk.metadata.get("page", 0) + 1)
+        chunk.metadata["document_name"] = doc_name
+        chunk.metadata["page_number"] = page_num
+        chunk.metadata["chunk_id"] = f"{doc_name}_p{page_num}_c{chunk_counter}"
+        if "section_title" not in chunk.metadata:
+            chunk.metadata["section_title"] = f"Clinical Guidelines ({doc_name})"
+
+    return chunks
+
 def get_embedding_function():
     """Initializes configurable embedding provider (Multilingual HuggingFace or OpenAI)."""
     provider = os.getenv("EMBEDDING_PROVIDER", "huggingface").lower()
@@ -285,13 +363,16 @@ def get_embedding_function():
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
     openai_key = os.getenv("OPENAI_API_KEY", "")
+    api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
 
     if provider == "openai" and openai_key and openai_key != "your_openai_api_key_here":
         print(f"Using OpenAI Embeddings ({model_name or 'text-embedding-3-small'})...")
         from langchain_openai import OpenAIEmbeddings
+        base_url = "https://api.openai.com/v1" if "openrouter" in api_base else api_base
         return OpenAIEmbeddings(
             model=model_name or "text-embedding-3-small",
-            openai_api_key=openai_key
+            openai_api_key=openai_key,
+            openai_api_base=base_url
         )
     else:
         print(f"Using Multilingual HuggingFace Embeddings ({model_name})...")
@@ -302,14 +383,10 @@ def get_embedding_function():
             from langchain_community.embeddings import HuggingFaceEmbeddings
             return HuggingFaceEmbeddings(model_name=model_name)
 
-def store_in_chromadb(documents, persist_dir: str):
+def store_in_chromadb(documents, persist_dir: str = None):
     """Step 5: Store chunks and vector embeddings into local ChromaDB."""
-    print(f"[Step 5] Cleaning old database directory '{persist_dir}' for fresh ingestion...")
-    if os.path.exists(persist_dir):
-        try:
-            shutil.rmtree(persist_dir, ignore_errors=True)
-        except Exception as e:
-            print(f"Warning clearing persist dir: {e}")
+    if persist_dir is None:
+        persist_dir = PERSIST_DIR
 
     print(f"[Step 5] Initializing local ChromaDB at directory: '{persist_dir}'...")
     try:
@@ -328,6 +405,10 @@ def store_in_chromadb(documents, persist_dir: str):
     
     print(f"[Step 5] Ingestion Complete! Indexed {len(documents)} clean clinical body chunks into ChromaDB at '{persist_dir}'.")
     return vectorstore
+
+def build_index(chunks, persist_dir: str = None):
+    """Alias for store_in_chromadb to build/persist vector store index."""
+    return store_in_chromadb(chunks, persist_dir=persist_dir)
 
 def main():
     print("=" * 75)

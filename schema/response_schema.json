@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClinicalGroundedResponse",
+  "type": "object",
+  "properties": {
+    "recommendation": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "string"
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "document": { "type": "string" },
+          "section": { "type": "string" },
+          "page": { "type": "integer" }
+        },
+        "required": ["document", "page"]
+      }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low", "insufficient"]
+    }
+  },
+  "required": ["recommendation", "evidence", "citations", "confidence"],
+  "if": {
+    "properties": {
+      "confidence": { "enum": ["high", "medium", "low"] }
+    }
+  },
+  "then": {
+    "properties": {
+      "evidence": { "minLength": 1 },
+      "citations": { "minItems": 1 }
+    }
+  }
+}

@@ -19,7 +19,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-from retrieve import query_clinical_rag
+from retrieve import query_clinical_rag, load_index, retrieve
 
 load_dotenv()
 
@@ -99,102 +99,65 @@ def generate_clinical_recommendation(query_text: str, top_k: int = 3, doc_filter
     if api_key and api_key != "your_openai_api_key_here":
         print(f"\n[*] Synthesizing clinical recommendation using OpenRouter/OpenAI LLM ({model_name})...")
         try:
-            from langchain_openai import ChatOpenAI
-            from langchain_core.prompts import PromptTemplate
-
-            llm = ChatOpenAI(
-                model=model_name,
-                temperature=0.1,
-                openai_api_key=api_key,
-                openai_api_base=api_base
-            )
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key, base_url=api_base)
 
             if is_ar:
-                prompt_template = PromptTemplate.from_template(
-                    """أنت طبيب استشاري ومساعد سريري خبير.
-قم بالإجابة على سؤال الطبيب باللغة العربية بأسلوب سريري دقيق وموجز بناءً على سياق الدلائل الطبية المرفقة فقط.
-إذا كان السؤال خارج نطاق الدلائل الطبية المرفقة أو لم يذكر السياق الإجابة، صرح بوضوح بأن المعلومة غير متوفرة في الدلائل المتاحة.
-يجب توثيق كل جملة أو توصية تقوم بكتابتها بمرجع داخلي مثل [مرجع-1] أو [مرجع-2].
-
-سياق الدلائل الطبية المقتطفة:
-{context}
-
-سؤال الطبيب: {question}
-
-التوصية السريرية الموثقة (باللغة العربية مع توثيق المراجع):"""
+                system_prompt = (
+                    "أنت طبيب استشاري خبير متخصص في الدلائل الإرشادية لمرض السكري والكرومات والجزء الهرموني.\n"
+                    "القاعدة الذهبية: لا تجب على أي سؤال بدون دعم كامل بالاستشهادات ودلائل من النصوص المرفقة.\n"
+                    "يجب تضمين اسم المستند ورقم الصفحة لكل توصية سريرية تقوم بصياغتها.\n"
+                    "إذا كان السؤال خارج نطاق المراجع المرفقة، اذكر بوضوح أن المراجع الحالية لا تحتوي على الإجابة."
                 )
+                user_prompt = f"الاستفسار السريري: {query_text}\n\nالنصوص والدلائل المتاحة:\n{full_context}\n\nيرجى تقديم توصية سريرية دقيقة ومسببة مدعمة بالمراجع والمستندات."
             else:
-                prompt_template = PromptTemplate.from_template(
-                    """You are an expert Clinical Decision Support Assistant.
-Answer the clinician's question using ONLY the provided evidence context below.
-If the context does not contain sufficient clinical information to answer the question, state: "The requested information is not available in the provided clinical guidelines."
-Every single claim or recommendation you make MUST end with an inline reference tag like [Ref-1], [Ref-2], etc.
-
-Evidence Context:
-{context}
-
-Clinician Question: {question}
-
-Synthesized Clinical Answer (with Inline References):"""
+                system_prompt = (
+                    "You are an expert Clinical Decision Support Assistant specializing in Diabetes & Endocrinology Guidelines.\n"
+                    "THE GOLDEN RULE: 'No claim without a citation.' Every recommendation must include explicit inline citations [Doc Name | Section | Page].\n"
+                    "Only make assertions that are supported by the provided clinical context passages. If the context does not contain the answer, explicitly state that."
                 )
+                user_prompt = f"Clinical Question: {query_text}\n\nAvailable Evidence Passages:\n{full_context}\n\nPlease provide a clear, citable clinical recommendation based strictly on the evidence above."
 
-            chain = prompt_template | llm
-            response = chain.invoke({"context": full_context, "question": query_text})
-            answer = response.content
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                max_tokens=400
+            )
 
+            recommendation = response.choices[0].message.content.strip()
+            print("\n" + "=" * 80)
+            print("                 SYNTHESIZED CLINICAL RECOMMENDATION                ")
+            print("=" * 80)
+            print(recommendation)
+            print("=" * 80 + "\n")
+            return recommendation
         except Exception as e:
-            print(f"[Notice] LLM API error ({e}). Using Deterministic Clinical Evidence Synthesizer.")
-            answer = build_rule_based_synthesis(query_text, results_with_scores, is_ar=is_ar)
-    else:
-        print("\n[*] Notice: API Key not set. Using Deterministic Clinical Evidence Synthesizer...")
-        answer = build_rule_based_synthesis(query_text, results_with_scores, is_ar=is_ar)
+            print(f"\n[LLM API Error] Falling back to structured citable summary: {e}")
 
-    print("\n" + "=" * 80)
-    sec_title = "                      التوصية السريرية الموثقة                      " if is_ar else "                      SYNTHESIZED CLINICAL RECOMMENDATION                      "
-    print(sec_title)
-    print("=" * 80)
-    print(answer)
-    print("\n" + "=" * 80)
-    print("CITATIONS & EVIDENCE SOURCES (Golden Rule Traceability):")
-    for cit in citations_list:
-        print(f"  - {cit}")
-    print("=" * 80 + "\n")
-    return answer
+    # Offline / Fallback Citable Summary
+    print("\n[Fallback Mode] Generating evidence-based citable summary directly from retrieved passages:")
+    fallback_output = [
+        f"Clinical Question: {query_text}\n",
+        "Key Retrived Clinical Evidence & Guidelines:"
+    ]
+    for citation, block in zip(citations_list, context_blocks):
+        fallback_output.append(f"\n• According to [{citation}]:")
+        fallback_output.append(f"  \"{block.splitlines()[-1][:250]}...\"")
 
-def build_rule_based_synthesis(query_text: str, results_with_scores, is_ar: bool = False):
-    """Fallback deterministic evidence synthesizer supporting Arabic and English."""
-    if is_ar:
-        lines = [f"بناءً على الدلائل الإرشادية السريرية لـ '{query_text}':\n"]
-        for idx, (doc, score) in enumerate(results_with_scores, 1):
-            meta = doc.metadata
-            ref_tag = f"[مرجع-{idx}: {meta.get('document_name')} | الصفحة {meta.get('page_number')} | القسم '{meta.get('section_title')}']"
-            snippet = doc.page_content.strip().replace("\n", " ")
-            if len(snippet) > 250:
-                snippet = snippet[:250] + "..."
-            lines.append(f"{idx}. {snippet} {ref_tag}")
-        lines.append("\nالخلاصة: تنصح الدلائل الطبية أعلاه بمراجعة البروتوكولات السريرية المحددة والتحاليل الخاصة بكل مريض.")
-    else:
-        lines = [f"Based on retrieved Clinical Guidelines for '{query_text}':\n"]
-        for idx, (doc, score) in enumerate(results_with_scores, 1):
-            meta = doc.metadata
-            ref_tag = f"[Ref-{idx}: {meta.get('document_name')}, Sec '{meta.get('section_title')}', Page {meta.get('page_number')}]"
-            snippet = doc.page_content.strip().replace("\n", " ")
-            if len(snippet) > 250:
-                snippet = snippet[:250] + "..."
-            lines.append(f"{idx}. {snippet} {ref_tag}")
-        lines.append("\nConclusion: The above guidelines recommend reviewing specific clinical protocols and patient-specific metrics.")
-    
-    return "\n".join(lines)
+    final_fallback = "\n".join(fallback_output)
+    print(final_fallback)
+    return final_fallback
 
-def main():
-    parser = argparse.ArgumentParser(description="Clinical Decision Support Generative Engine")
-    parser.add_argument("query", nargs="?", default="ما هي معايير تشخيص مرض السكري؟", help="Clinical question (Arabic or English)")
-    parser.add_argument("--k", type=int, default=3, help="Number of evidence chunks to synthesize")
-    parser.add_argument("--doc", type=str, default=None, help="Filter to specific document_name")
-    parser.add_argument("--lang", type=str, default="en", help="Language code ('ar' or 'en')")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Clinical Decision Support Generative RAG Engine")
+    parser.add_argument("query", type=str, help="Clinical question or scenario")
+    parser.add_argument("--k", type=int, default=3, help="Number of evidence chunks to retrieve")
+    parser.add_argument("--doc", type=str, default=None, help="Filter search to specific guideline document")
+    parser.add_argument("--lang", type=str, default="en", choices=["en", "ar"], help="Language output (en/ar)")
 
     args = parser.parse_args()
     generate_clinical_recommendation(args.query, top_k=args.k, doc_filter=args.doc, lang=args.lang)
-
-if __name__ == "__main__":
-    main()

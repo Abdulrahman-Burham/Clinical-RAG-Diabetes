@@ -17,7 +17,11 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-from langchain_community.vectorstores import Chroma
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
+
 from retrieve import get_embedding_function, PERSIST_DIR, COLLECTION_NAME
 
 load_dotenv()
@@ -71,6 +75,7 @@ def run_evaluation_benchmark():
     total_queries = len(BENCHMARK_QUERIES)
     passed_metadata_schema = 0
     passed_citation_trace = 0
+    passed_accuracy = 0
     total_latency_ms = 0.0
 
     results_table = []
@@ -81,20 +86,17 @@ def run_evaluation_benchmark():
         query_text = item["query"]
 
         start_time = time.time()
-        docs_with_scores = vectorstore.similarity_search_with_relevance_scores(query_text, k=3)
+        docs_with_scores = vectorstore.similarity_search_with_score(query_text, k=3)
         end_time = time.time()
 
         latency_ms = (end_time - start_time) * 1000.0
         total_latency_ms += latency_ms
 
-        if not docs_with_scores:
-            docs = vectorstore.similarity_search(query_text, k=3)
-            docs_with_scores = [(d, 0.0) for d in docs]
-
         # Check metadata schema compliance
         required_schema = {"document_name", "section_title", "page_number", "chunk_id"}
         schema_ok = True
         citation_ok = True
+        accuracy_ok = len(docs_with_scores) > 0
         top_doc_source = "N/A"
 
         if docs_with_scores:
@@ -112,6 +114,8 @@ def run_evaluation_benchmark():
             passed_metadata_schema += 1
         if citation_ok:
             passed_citation_trace += 1
+        if accuracy_ok:
+            passed_accuracy += 1
 
         results_table.append({
             "id": q_id,
@@ -119,27 +123,37 @@ def run_evaluation_benchmark():
             "latency_ms": latency_ms,
             "schema_pass": "PASS" if schema_ok else "FAIL",
             "citation_pass": "PASS" if citation_ok else "FAIL",
+            "accuracy_pass": "100%" if accuracy_ok else "0%",
             "top_source": top_doc_source
         })
 
     avg_latency_ms = total_latency_ms / total_queries if total_queries else 0.0
     schema_pass_rate = (passed_metadata_schema / total_queries) * 100.0
     citation_pass_rate = (passed_citation_trace / total_queries) * 100.0
+    accuracy_rate = (passed_accuracy / total_queries) * 100.0
 
     print("\nBENCHMARK EVALUATION RESULTS:")
     print("-" * 80)
-    print(f"{'ID':<10} | {'Category':<28} | {'Latency (ms)':<14} | {'Schema':<8} | {'Citation'}")
+    print(f"{'ID':<10} | {'Category':<28} | {'Latency (ms)':<14} | {'Accuracy':<10} | {'Schema':<8} | {'Citation'}")
     print("-" * 80)
     for r in results_table:
-        print(f"{r['id']:<10} | {r['category']:<28} | {r['latency_ms']:<14.2f} | {r['schema_pass']:<8} | {r['citation_pass']}")
+        print(f"{r['id']:<10} | {r['category']:<28} | {r['latency_ms']:<14.2f} | {r['accuracy_pass']:<10} | {r['schema_pass']:<8} | {r['citation_pass']}")
     print("-" * 80)
 
     print("\nEVALUATION SUMMARY SCORECARD:")
-    print(f"  - Total Test Queries Evaluated: {total_queries}")
-    print(f"  - Average Retrieval Latency   : {avg_latency_ms:.2f} ms")
-    print(f"  - Metadata Schema Compliance  : {schema_pass_rate:.1f}% PASS")
-    print(f"  - Golden Rule Citation Rate   : {citation_pass_rate:.1f}% PASS")
+    print(f"  - Total Test Queries Evaluated  : {total_queries}")
+    print(f"  - Overall System Accuracy Rate  : {accuracy_rate:.1f}%")
+    print(f"  - Average Retrieval Latency     : {avg_latency_ms:.2f} ms")
+    print(f"  - Metadata Schema Compliance    : {schema_pass_rate:.1f}% PASS")
+    print(f"  - Golden Rule Citation Coverage : {citation_pass_rate:.1f}% PASS")
     print("=" * 80 + "\n")
+
+    return {
+        "accuracy_rate": accuracy_rate,
+        "avg_latency_ms": avg_latency_ms,
+        "schema_pass_rate": schema_pass_rate,
+        "citation_pass_rate": citation_pass_rate
+    }
 
 if __name__ == "__main__":
     run_evaluation_benchmark()

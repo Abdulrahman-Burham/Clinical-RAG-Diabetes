@@ -1,7 +1,8 @@
 """
-retrieve.py - Multi-Document Clinical Guidelines Vector Retrieval Pipeline
+retrieve.py - Multi-Document Clinical Guidelines Vector Retrieval & Cohere Reranking Pipeline
 
 Queries local ChromaDB vector store containing ingested clinical diabetes guidelines,
+applies optional Cohere Reranking (rerank-v3.5) for state-of-the-art precision,
 enforces strict Golden Rule traceability, displays complete chunk metadata,
 supports document-level metadata filtering and query normalization/expansion for Arabic typos.
 """
@@ -47,12 +48,16 @@ def get_embedding_function():
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
     openai_key = os.getenv("OPENAI_API_KEY", "")
+    api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
 
     if provider == "openai" and openai_key and openai_key != "your_openai_api_key_here":
+        print(f"Using OpenAI Embeddings ({model_name or 'text-embedding-3-small'})...")
         from langchain_openai import OpenAIEmbeddings
+        base_url = "https://api.openai.com/v1" if "openrouter" in api_base else api_base
         return OpenAIEmbeddings(
             model=model_name or "text-embedding-3-small",
-            openai_api_key=openai_key
+            openai_api_key=openai_key,
+            openai_api_base=base_url
         )
     else:
         try:
@@ -62,110 +67,119 @@ def get_embedding_function():
             from langchain_community.embeddings import HuggingFaceEmbeddings
             return HuggingFaceEmbeddings(model_name=model_name)
 
-def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
-    """
-    Queries local ChromaDB collection and returns top-K evidence chunks with distance scores.
-    Uses similarity_search_with_score to ensure robust top-K retrieval without dropping results.
-    """
-    if not os.path.exists(PERSIST_DIR):
-        print(f"[Error] ChromaDB directory '{PERSIST_DIR}' does not exist. Please run 'python ingest.py' first.")
-        return []
-
+def load_index(persist_dir: str = None):
+    """Loads existing ChromaDB vectorstore."""
+    if persist_dir is None:
+        persist_dir = PERSIST_DIR
     try:
         from langchain_chroma import Chroma
     except ImportError:
         from langchain_community.vectorstores import Chroma
 
     embedding_function = get_embedding_function()
-
-    vectorstore = Chroma(
-        persist_directory=PERSIST_DIR,
+    return Chroma(
+        persist_directory=persist_dir,
         embedding_function=embedding_function,
         collection_name=COLLECTION_NAME
     )
 
+def retrieve(vectordb, query_text: str, k: int = 3, doc_filter: str = None):
+    """
+    Retrieves top k documents with optional Cohere Reranking for high precision.
+    """
     filter_dict = {}
     if doc_filter and doc_filter != "ALL" and not doc_filter.startswith("All") and not doc_filter.startswith("جميع"):
         filter_dict = {"document_name": doc_filter}
+    
+    search_query = normalize_arabic_query(query_text)
+    
+    # Retrieve top candidates for reranking
+    candidate_k = max(k * 3, 10)
+    try:
+        if filter_dict:
+            initial_results = vectordb.similarity_search_with_score(search_query, k=candidate_k, filter=filter_dict)
+        else:
+            initial_results = vectordb.similarity_search_with_score(search_query, k=candidate_k)
+    except Exception:
+        return []
 
-    # Normalize Arabic query for typos
+    if not initial_results:
+        return []
+
+    # Check for Cohere API key for Reranking
+    cohere_key = os.getenv("COHERE_API_KEY", "")
+    if cohere_key:
+        try:
+            import cohere
+            co = cohere.ClientV2(cohere_key)
+            docs_text = [doc.page_content for doc, _ in initial_results]
+            
+            res = co.rerank(
+                model="rerank-v3.5",
+                query=query_text,
+                documents=docs_text,
+                top_n=k
+            )
+            
+            reranked = []
+            for r in res.results:
+                orig_doc, _ = initial_results[r.index]
+                score = float(r.relevance_score)
+                reranked.append((orig_doc, score))
+            return reranked
+        except Exception as e:
+            pass
+
+    # Standard normalized similarity scores fallback
+    normalized_results = []
+    for doc, dist in initial_results[:k]:
+        score = 1.0 / (1.0 + max(0.0, float(dist)))
+        normalized_results.append((doc, score))
+        
+    return normalized_results
+
+def query_clinical_rag(query_text: str, top_k: int = 3, doc_filter: str = None):
+    """
+    Queries local ChromaDB collection and returns top-K evidence chunks with distance/rerank scores.
+    """
+    if not os.path.exists(PERSIST_DIR):
+        print(f"[Error] ChromaDB directory '{PERSIST_DIR}' does not exist. Please run 'python ingest.py' first.")
+        return []
+
+    vectordb = load_index(PERSIST_DIR)
+
     search_query = normalize_arabic_query(query_text)
 
     print("\n" + "=" * 80)
-    print("           MULTI-DOCUMENT CLINICAL RAG RETRIEVAL RESULTS           ")
+    print("      MULTI-DOCUMENT CLINICAL RAG RETRIEVAL & COHERE RERANK RESULTS       ")
     print("=" * 80)
     print(f"RAW QUERY: \"{query_text}\" | SEARCH QUERY: \"{search_query}\"")
-    if filter_dict:
+    if doc_filter:
         print(f"FILTER: Document Name == '{doc_filter}'")
-    print(f"RETRIEVING TOP {top_k} MOST RELEVANT CLINICAL EVIDENCE CHUNKS...\n")
+    print(f"RETRIEVING & RERANKING TOP {top_k} MOST RELEVANT CLINICAL EVIDENCE CHUNKS...\n")
 
-    if filter_dict:
-        results_with_scores = vectorstore.similarity_search_with_score(
-            search_query,
-            k=top_k,
-            filter=filter_dict
-        )
-    else:
-        results_with_scores = vectorstore.similarity_search_with_score(
-            search_query,
-            k=top_k
-        )
-
-    # Fallback Query Expansion if 0 results returned
-    if not results_with_scores and search_query != "مرض السكري التشخيص والعلاج":
-        fallback_query = "مرض السكري التشخيص والعلاج والارشاد السريري" if any("\u0600" <= c <= "\u06FF" for c in query_text) else "Diabetes diagnosis management guidelines"
-        print(f"[*] Retry with expanded fallback query: '{fallback_query}'")
-        if filter_dict:
-            results_with_scores = vectorstore.similarity_search_with_score(
-                fallback_query,
-                k=top_k,
-                filter=filter_dict
-            )
-        else:
-            results_with_scores = vectorstore.similarity_search_with_score(
-                fallback_query,
-                k=top_k
-            )
-
-    if not results_with_scores:
-        print("[-] No matching clinical evidence chunks found.")
-        return []
+    results_with_scores = retrieve(vectordb, query_text, k=top_k, doc_filter=doc_filter)
 
     for idx, (doc, score) in enumerate(results_with_scores, 1):
         meta = doc.metadata
-        doc_name = meta.get("document_name", "UNKNOWN")
-        section = meta.get("section_title", "N/A")
-        page_num = meta.get("page_number", "N/A")
-        chunk_id = meta.get("chunk_id", "N/A")
-
-        print(f"--- [RESULT #{idx}] (Distance Score: {score:.4f}) ---")
-        print(f"[*] CITATION (Golden Rule):")
-        print(f"   [Source Document: {doc_name} | Section: '{section}' | Page: {page_num} | Chunk ID: {chunk_id}]")
-        print(f"[*] METADATA DETAILS:")
-        print(f"   - Document Name : {doc_name}")
-        print(f"   - Section Title : {section}")
-        print(f"   - Page Number   : {page_num}")
-        print(f"   - Chunk ID      : {chunk_id}")
-        print(f"[*] RETRIEVED EVIDENCE CHUNK:")
-        print("   " + "-" * 74)
-        for line in doc.page_content.strip().split("\n"):
-            print(f"   {line}")
-        print("   " + "-" * 74 + "\n")
-
-    print("=" * 80)
-    print("GOLDEN RULE VERIFIED: Every retrieved chunk includes complete citation provenance.")
-    print("=" * 80 + "\n")
+        print(f"--- [RESULT {idx}/{len(results_with_scores)}] Relevance / Cohere Rerank Score: {score:.4f} ---")
+        print(f"  📌 Document:  {meta.get('document_name', 'N/A')}")
+        print(f"  📖 Section:   {meta.get('section_title', 'N/A')}")
+        print(f"  📄 Page Num:  {meta.get('page_number', 'N/A')}")
+        print(f"  🆔 Chunk ID:  {meta.get('chunk_id', 'N/A')}")
+        print(f"  📝 Content Snippet:")
+        content_preview = doc.page_content.strip()
+        if len(content_preview) > 300:
+            content_preview = content_preview[:300] + "..."
+        print(f"     \"{content_preview}\"\n")
 
     return results_with_scores
 
-def main():
-    parser = argparse.ArgumentParser(description="Multi-Document Clinical Guidelines RAG Retrieval Engine")
-    parser.add_argument("query", nargs="?", default="What are the fasting blood glucose criteria for diagnosing diabetes?", help="Clinical search query")
-    parser.add_argument("--k", type=int, default=3, help="Number of top chunks to retrieve")
-    parser.add_argument("--doc", type=str, default=None, help="Filter search to specific document_name")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Query Clinical Diabetes Guidelines Vector Database")
+    parser.add_argument("query", type=str, help="Clinical question or query text")
+    parser.add_argument("--k", type=int, default=3, help="Number of top evidence chunks to retrieve (default: 3)")
+    parser.add_argument("--doc", type=str, default=None, help="Filter search to specific document name")
 
     args = parser.parse_args()
     query_clinical_rag(args.query, top_k=args.k, doc_filter=args.doc)
-
-if __name__ == "__main__":
-    main()

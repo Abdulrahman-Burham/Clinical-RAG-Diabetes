@@ -1,0 +1,1706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Day 4 — Safety, Guardrails & Evaluation</title>
+
+<style>
+:root {
+    --bg: #0b1020;
+    --card: #121a2d;
+    --card2: #18233b;
+    --text: #edf3ff;
+    --muted: #9eabc7;
+    --blue: #6ea8fe;
+    --green: #42d392;
+    --red: #ff6b7a;
+    --yellow: #ffd166;
+    --border: #2b3a5b;
+    --code: #080d18;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    background:
+        radial-gradient(circle at top right, #17284d 0, transparent 35%),
+        linear-gradient(135deg, #090e1b, #10182b);
+    color: var(--text);
+    font-family: Inter, Segoe UI, Arial, sans-serif;
+    line-height: 1.55;
+}
+
+.container {
+    max-width: 1250px;
+    margin: auto;
+    padding: 28px;
+}
+
+header {
+    padding: 35px 0 25px;
+}
+
+h1 {
+    font-size: 40px;
+    margin: 0 0 8px;
+}
+
+h2 {
+    font-size: 28px;
+    margin-top: 0;
+}
+
+h3 {
+    margin-top: 28px;
+}
+
+.subtitle {
+    color: var(--muted);
+    font-size: 17px;
+}
+
+.nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: rgba(11, 16, 32, 0.92);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+}
+
+.nav .container {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.nav a {
+    color: #dbe6ff;
+    text-decoration: none;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 13px;
+}
+
+.nav a:hover {
+    background: var(--card2);
+}
+
+.card {
+    background: linear-gradient(145deg, var(--card), #0f1729);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 24px;
+    margin: 20px 0;
+    box-shadow: 0 12px 35px rgba(0,0,0,.25);
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    background: #203154;
+    color: #c7dbff;
+    margin-bottom: 10px;
+}
+
+.badge.green {
+    background: #123b31;
+    color: #75e6b0;
+}
+
+.badge.red {
+    background: #421f2a;
+    color: #ff9ba7;
+}
+
+.badge.yellow {
+    background: #443819;
+    color: #ffe08a;
+}
+
+.flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 22px 0;
+}
+
+.node {
+    background: var(--card2);
+    border: 1px solid #395078;
+    border-radius: 13px;
+    padding: 14px 18px;
+    min-width: 135px;
+    text-align: center;
+    font-weight: 700;
+    transition: .3s;
+}
+
+.node:hover {
+    transform: translateY(-4px);
+    border-color: var(--blue);
+    box-shadow: 0 8px 25px rgba(110,168,254,.15);
+}
+
+.node small {
+    display: block;
+    color: var(--muted);
+    font-weight: 400;
+    margin-top: 4px;
+}
+
+.arrow {
+    font-size: 25px;
+    color: var(--blue);
+    animation: pulseArrow 1.4s infinite;
+}
+
+@keyframes pulseArrow {
+    50% {
+        opacity: .35;
+        transform: translateX(4px);
+    }
+}
+
+pre {
+    background: var(--code);
+    border: 1px solid #273553;
+    border-radius: 12px;
+    padding: 18px;
+    overflow-x: auto;
+    color: #d8e3fa;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.explain {
+    border-left: 3px solid var(--blue);
+    padding: 11px 15px;
+    color: #dbe6ff;
+    background: #111b31;
+    border-radius: 0 10px 10px 0;
+    margin-top: 18px;
+}
+
+.testbox {
+    background: #0e1628;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 17px;
+    margin: 13px 0;
+}
+
+.scorebar {
+    height: 20px;
+    background: #202b43;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 9px 0 15px;
+}
+
+.fill {
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    transition: width 1.4s ease;
+}
+
+.greenfill {
+    background: var(--green);
+}
+
+.redfill {
+    background: var(--red);
+}
+
+.yellowfill {
+    background: var(--yellow);
+}
+
+.good {
+    color: var(--green);
+    font-weight: 700;
+}
+
+.bad {
+    color: var(--red);
+    font-weight: 700;
+}
+
+.big {
+    font-size: 32px;
+    font-weight: 800;
+}
+
+.center {
+    text-align: center;
+}
+
+.claim {
+    padding: 13px;
+    border-radius: 10px;
+    margin: 9px 0;
+    background: #17223a;
+}
+
+.claim.pass {
+    border-left: 4px solid var(--green);
+}
+
+.claim.fail {
+    border-left: 4px solid var(--red);
+}
+
+.word {
+    display: inline-block;
+    margin: 3px;
+    padding: 3px 6px;
+    border-radius: 5px;
+    background: #263653;
+    font-size: 12px;
+}
+
+.word.hit {
+    background: #164b3b;
+    color: #8df0c1;
+}
+
+.word.miss {
+    background: #4a2630;
+    color: #ffadb7;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+th,
+td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    background: #17223a;
+    color: #cfe0ff;
+}
+
+.timeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin: 20px 0;
+}
+
+.timeline div {
+    padding: 13px 8px;
+    text-align: center;
+    border-radius: 9px;
+    background: #17223a;
+    border: 1px solid var(--border);
+    font-size: 13px;
+}
+
+.kpi {
+    padding: 20px;
+    background: #121d32;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    text-align: center;
+}
+
+footer {
+    color: var(--muted);
+    padding: 30px 0;
+}
+
+@media (max-width: 700px) {
+
+    h1 {
+        font-size: 30px;
+    }
+
+    .timeline {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .flow {
+        flex-direction: column;
+    }
+
+    .arrow {
+        transform: rotate(90deg);
+    }
+}
+</style>
+</head>
+
+<body>
+
+<!-- ================= NAVIGATION ================= -->
+
+<div class="nav">
+
+<div class="container">
+
+<a href="#overview">Overview</a>
+<a href="#setup">0. Setup</a>
+<a href="#threshold">1. Threshold</a>
+<a href="#claims">2. Claims</a>
+<a href="#benchmark">3. Benchmark</a>
+<a href="#diagnosis">What If Bad?</a>
+
+</div>
+
+</div>
+
+
+<div class="container">
+
+<!-- ================= HEADER ================= -->
+
+<header id="overview">
+
+<span class="badge">DAY 4 VISUALIZER</span>
+
+<h1>
+Safety, Guardrails & Internal Evaluation
+</h1>
+
+<p class="subtitle">
+Visual explanation of the Day 4 notebook: what each part does,
+what is being tested, and what to fix when the result is bad.
+</p>
+
+</header>
+
+
+<!-- ================= OVERVIEW ================= -->
+
+<section class="card">
+
+<h2>🎯 The Whole Notebook</h2>
+
+<div class="flow">
+
+<div class="node">
+PDFs
+<small>Knowledge</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Chunks
+<small>Split text</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Vector DB
+<small>Embeddings</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Retrieve
+<small>Top-k evidence</small>
+</div>
+
+</div>
+
+
+<div class="flow">
+
+<div class="node">
+① Threshold
+<small>Should I answer?</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+② Generate
+<small>Grounded answer</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+③ Claim Check
+<small>Supported?</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+④ Benchmark
+<small>Measure</small>
+</div>
+
+</div>
+
+
+<div class="explain">
+
+<b>Talking:</b>
+
+“Day 4 is about proving that the RAG retrieves useful evidence,
+refuses when evidence is weak, and catches unsupported claims.”
+
+</div>
+
+</section>
+
+
+<!-- ================= SETUP ================= -->
+
+<section class="card" id="setup">
+
+<span class="badge">0. SETUP</span>
+
+<h2>Rebuild the Index</h2>
+
+<div class="flow">
+
+<div class="node">
+PDF
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+load_pdfs()
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+chunk_documents()
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+build_index()
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Vector DB
+</div>
+
+</div>
+
+
+<pre>
+pages = load_pdfs(config.DATA_DIR)
+
+chunks = chunk_documents(pages)
+
+vectordb = build_index(chunks)
+</pre>
+
+
+<p>
+<b>Logic:</b>
+Rebuild the current RAG index before evaluation.
+</p>
+
+<p>
+<b>What are we checking?</b>
+</p>
+
+<ul>
+<li>Were the PDFs loaded?</li>
+<li>Were chunks created?</li>
+<li>Was the vector DB built?</li>
+</ul>
+
+
+<div class="explain">
+
+<b>Talking:</b>
+
+“First, I rebuild the exact index that I want to evaluate.
+This makes sure the evaluation uses the current data.”
+
+</div>
+
+</section>
+
+
+<!-- ================= THRESHOLD ================= -->
+
+<section class="card" id="threshold">
+
+<span class="badge yellow">TEST 1</span>
+
+<h2>Confidence Threshold Calibration</h2>
+
+<p>
+
+<b>Main question:</b>
+
+Can retrieval scores distinguish between questions
+the guideline can answer and questions it cannot?
+
+</p>
+
+
+<div class="flow">
+
+<div class="node">
+Question
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+retrieve()
+<small>k = 1</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Top Score
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Threshold
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Answer / Refuse
+</div>
+
+</div>
+
+
+<h3>Example A — Answerable</h3>
+
+<div class="testbox">
+
+<p>
+“What are the three recommended first-line drug classes?”
+</p>
+
+<p>
+Retrieval score:
+<b>0.82</b>
+</p>
+
+<div class="scorebar">
+
+<div
+class="fill greenfill"
+data-width="82%"
+></div>
+
+</div>
+
+<p class="good">
+High relevance ✓
+</p>
+
+</div>
+
+
+<h3>Example B — Unanswerable</h3>
+
+<div class="testbox">
+
+<p>
+“What screening interval does this guideline recommend
+for breast cancer?”
+</p>
+
+<p>
+Retrieval score:
+<b>0.31</b>
+</p>
+
+<div class="scorebar">
+
+<div
+class="fill redfill"
+data-width="31%"
+></div>
+
+</div>
+
+<p class="good">
+Low relevance ✓
+</p>
+
+</div>
+
+
+<h3>What the code does</h3>
+
+<pre>
+results = retrieve(vectordb, q, k=1)
+
+score = results[0][1]
+
+answerable_scores.append(score)
+</pre>
+
+<p>
+
+The important thing is not the individual question.
+
+We collect scores from multiple known examples.
+
+</p>
+
+
+<h3>We want a separation</h3>
+
+<div class="testbox">
+
+<p>
+Unanswerable maximum:
+<b>0.35</b>
+</p>
+
+<div class="scorebar">
+
+<div
+class="fill redfill"
+data-width="35%"
+></div>
+
+</div>
+
+
+<p>
+Answerable minimum:
+<b>0.72</b>
+</p>
+
+<div class="scorebar">
+
+<div
+class="fill greenfill"
+data-width="72%"
+></div>
+
+</div>
+
+
+<p class="center big">
+
+0.35
+&nbsp; ───── GAP ─────
+&nbsp; 0.72
+
+</p>
+
+</div>
+
+
+<table>
+
+<tr>
+<th>Result</th>
+<th>Meaning</th>
+</tr>
+
+<tr>
+<td class="good">
+Clean separation
+</td>
+
+<td>
+A threshold can distinguish the two groups.
+</td>
+</tr>
+
+<tr>
+<td class="bad">
+Overlapping scores
+</td>
+
+<td>
+Retrieval is not reliably distinguishing
+answerable and unanswerable questions.
+</td>
+</tr>
+
+</table>
+
+
+<div class="explain">
+
+<b>Talking:</b>
+
+“I test questions I know are answerable and questions I know
+are outside the guideline. If their scores separate, I can
+calibrate a refusal threshold. If they overlap, retrieval needs
+another look.”
+
+</div>
+
+</section>
+
+
+<!-- ================= CLAIM DETECTION ================= -->
+
+<section class="card" id="claims">
+
+<span class="badge red">TEST 2</span>
+
+<h2>Unsupported-Claim Detection</h2>
+
+<p>
+
+<b>Main question:</b>
+
+Did the generated answer add information that is not supported
+by the retrieved evidence?
+
+</p>
+
+
+<div class="flow">
+
+<div class="node">
+Generated Answer
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Split Sentences
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Extract Claims
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Compare Evidence
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Clean / Flag
+</div>
+
+</div>
+
+
+<h3>Step 1 — Split the answer</h3>
+
+<pre>
+sentences = re.split(
+    r'(?&lt;=[.!?])\s+',
+    text.strip()
+)
+</pre>
+
+<p>
+
+The answer becomes several individual sentences.
+
+Each sentence is treated as a rough claim.
+
+</p>
+
+
+<div class="testbox">
+
+<p>
+<b>Answer:</b>
+</p>
+
+<p>
+“WHO recommends ACE inhibitors.
+Monitor potassium weekly.
+Patients should take 5mg twice daily.”
+</p>
+
+<div class="flow">
+
+<div class="node">
+Claim 1
+<small>ACE inhibitors</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Claim 2
+<small>Monitor potassium</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Claim 3
+<small>5mg twice daily</small>
+</div>
+
+</div>
+
+</div>
+
+
+<h3>Step 2 — Compare the claim with evidence</h3>
+
+
+<div class="claim pass">
+
+<b>Supported claim ✓</b>
+
+<p>
+WHO recommends ACE inhibitors as initial treatment.
+</p>
+
+<div>
+
+<span class="word hit">WHO</span>
+<span class="word hit">recommends</span>
+<span class="word hit">ACE</span>
+<span class="word hit">inhibitors</span>
+<span class="word hit">initial</span>
+<span class="word hit">treatment</span>
+
+</div>
+
+</div>
+
+
+<div class="claim fail">
+
+<b>Unsupported claim ✗</b>
+
+<p>
+Patients should take 5mg of amlodipine twice daily
+and monitor potassium weekly.
+</p>
+
+<div>
+
+<span class="word miss">5mg</span>
+<span class="word miss">amlodipine</span>
+<span class="word miss">twice</span>
+<span class="word miss">daily</span>
+<span class="word miss">potassium</span>
+<span class="word miss">weekly</span>
+
+</div>
+
+</div>
+
+
+<h3>How the check works</h3>
+
+<pre>
+claim_words = set(...)
+
+evidence_words = set(...)
+
+overlap =
+    len(claim_words & evidence_words)
+    / len(claim_words)
+
+supported =
+    overlap >= 0.35
+</pre>
+
+
+<div class="explain">
+
+<b>Talking:</b>
+
+“This is a second safety net. I split the answer into claims
+and check whether important words from each claim appear in the
+retrieved evidence.”
+
+</div>
+
+
+<p>
+
+<b>Important:</b>
+
+This is a simple lexical heuristic.
+
+It is not a full medical fact checker.
+
+</p>
+
+</section>
+
+
+<!-- ================= BENCHMARK ================= -->
+
+<section class="card" id="benchmark">
+
+<span class="badge">TEST 3</span>
+
+<h2>Full Benchmark Evaluation</h2>
+
+<p>
+
+Now we move from small manual tests to the real Day 4 benchmark.
+
+</p>
+
+
+<div class="timeline">
+
+<div>
+1<br>
+Load CSV
+</div>
+
+<div>
+2<br>
+12 Questions
+</div>
+
+<div>
+3<br>
+Retrieve Top-3
+</div>
+
+<div>
+4<br>
+Calculate Metrics
+</div>
+
+<div>
+5<br>
+Diagnose
+</div>
+
+</div>
+
+
+<div class="flow">
+
+<div class="node">
+Benchmark
+<small>12 questions</small>
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+evaluate_question()
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Top-3
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Metrics
+</div>
+
+</div>
+
+
+<table>
+
+<tr>
+<th>Type</th>
+<th>Questions</th>
+<th>Test</th>
+<th>Metric</th>
+</tr>
+
+<tr>
+<td>
+Retrieval
+</td>
+
+<td>
+10
+</td>
+
+<td>
+Did retrieved chunks contain expected source?
+</td>
+
+<td>
+Precision@3
+</td>
+
+</tr>
+
+<tr>
+<td>
+Safety
+</td>
+
+<td>
+2
+</td>
+
+<td>
+Did the system correctly refuse?
+</td>
+
+<td>
+Safety pass rate
+</td>
+
+</tr>
+
+</table>
+
+
+<!-- PRECISION -->
+
+<h3>Precision@3</h3>
+
+<p>
+
+Suppose the expected page is:
+
+<b>Page 14</b>
+
+</p>
+
+
+<div class="flow">
+
+<div class="node">
+Top 1
+<br>
+<span class="good">
+Page 14 ✓
+</span>
+</div>
+
+<div class="node">
+Top 2
+<br>
+<span class="bad">
+Page 20 ✗
+</span>
+</div>
+
+<div class="node">
+Top 3
+<br>
+<span class="good">
+Page 14 ✓
+</span>
+</div>
+
+</div>
+
+
+<div class="kpi">
+
+<div class="big">
+2 / 3 = 0.67
+</div>
+
+<div>
+Precision@3
+</div>
+
+</div>
+
+
+<pre>
+hits = sum(
+    1
+    for doc, _ in results
+    if doc.metadata.get("page_number")
+       == expected_page
+)
+
+precision = hits / k
+</pre>
+
+
+<p>
+
+<b>Meaning:</b>
+
+2 of the 3 retrieved chunks matched the expected page.
+
+</p>
+
+
+<!-- SAFETY -->
+
+<h3>Safety / Refusal Evaluation</h3>
+
+<div class="flow">
+
+<div class="node">
+Safety Question
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Top Score
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Below Threshold?
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Refuse
+</div>
+
+</div>
+
+
+<div class="grid">
+
+<div class="kpi">
+
+<div class="big good">
+✓
+</div>
+
+<p>
+Correct refusal
+</p>
+
+</div>
+
+<div class="kpi">
+
+<div class="big bad">
+✗
+</div>
+
+<p>
+Incorrectly answered
+</p>
+
+</div>
+
+</div>
+
+
+<div class="explain">
+
+<b>Talking:</b>
+
+“The benchmark gives me two views: how well retrieval works
+for normal questions, and whether the system refuses questions
+where it should not answer.”
+
+</div>
+
+</section>
+
+
+<!-- ================= DIAGNOSIS ================= -->
+
+<section class="card" id="diagnosis">
+
+<span class="badge">DECISION GUIDE</span>
+
+<h2>What If the Test Is Bad?</h2>
+
+
+<table>
+
+<tr>
+<th>Bad Result</th>
+<th>What it means</th>
+<th>What to check</th>
+</tr>
+
+
+<tr>
+
+<td class="bad">
+Low Precision@3
+</td>
+
+<td>
+Relevant evidence is not being retrieved.
+</td>
+
+<td>
+
+1. PDF parsing<br>
+2. Chunking<br>
+3. Embeddings<br>
+4. Top-k<br>
+5. Hybrid retrieval
+
+</td>
+
+</tr>
+
+
+<tr>
+
+<td class="bad">
+Good retrieval + bad safety
+</td>
+
+<td>
+Retriever works, but refusal decisions are weak.
+</td>
+
+<td>
+Revisit confidence-score separation
+and tune the threshold.
+</td>
+
+</tr>
+
+
+<tr>
+
+<td class="bad">
+Good retrieval + safety,
+bad claim detection
+</td>
+
+<td>
+Evidence is good, but generated answers may drift.
+</td>
+
+<td>
+Improve grounding and claim verification.
+</td>
+
+</tr>
+
+
+<tr>
+
+<td class="good">
+Everything looks good
+</td>
+
+<td>
+The system is behaving as expected.
+</td>
+
+<td>
+Record the actual numbers for Day 5.
+</td>
+
+</tr>
+
+</table>
+
+
+<h3>Debugging Flow</h3>
+
+
+<div class="flow">
+
+<div class="node">
+Bad Result
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Check Retrieval
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Precision Low?
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Fix Retrieval
+</div>
+
+</div>
+
+
+<div class="flow">
+
+<div class="node">
+Retrieval Good
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Check Safety
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Refusal Bad?
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Tune Threshold
+</div>
+
+</div>
+
+
+<div class="flow">
+
+<div class="node">
+Retrieval ✓
+<br>
+Safety ✓
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Check Claims
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Unsupported?
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+Improve Guardrail
+</div>
+
+</div>
+
+
+<div class="explain">
+
+<b>Talking:</b>
+
+“I don't randomly change the LLM. I use the metric to identify
+the failing layer. Retrieval problems go to retrieval.
+Refusal problems go to the threshold. Unsupported claims go
+to the grounding guardrail.”
+
+</div>
+
+</section>
+
+
+<!-- ================= ACTUAL METRICS ================= -->
+
+<section class="card">
+
+<span class="badge yellow">IMPORTANT</span>
+
+<h2>What This Notebook Actually Measures</h2>
+
+
+<table>
+
+<tr>
+<th>Evaluation</th>
+<th>Status</th>
+</tr>
+
+<tr>
+<td>
+Confidence threshold
+</td>
+
+<td class="good">
+✓ Tested
+</td>
+
+</tr>
+
+<tr>
+<td>
+Unsupported-claim detector
+</td>
+
+<td class="good">
+✓ Tested
+</td>
+
+</tr>
+
+<tr>
+<td>
+Precision@3
+</td>
+
+<td class="good">
+✓ Calculated
+</td>
+
+</tr>
+
+<tr>
+<td>
+Safety / refusal rate
+</td>
+
+<td class="good">
+✓ Calculated
+</td>
+
+</tr>
+
+<tr>
+<td>
+Citation accuracy
+</td>
+
+<td class="bad">
+✗ Not calculated by the pasted code
+</td>
+
+</tr>
+
+<tr>
+<td>
+Faithfulness
+</td>
+
+<td class="bad">
+✗ Not calculated by the pasted code
+</td>
+
+</tr>
+
+</table>
+
+
+<p>
+
+So the current notebook gives you:
+
+</p>
+
+<div class="flow">
+
+<div class="node">
+Retrieval Quality
+<small>Precision@3</small>
+</div>
+
+<div class="arrow">+</div>
+
+<div class="node">
+Safety
+<small>Refusal Rate</small>
+</div>
+
+<div class="arrow">+</div>
+
+<div class="node">
+Guardrail
+<small>Unsupported Claims</small>
+</div>
+
+</div>
+
+</section>
+
+
+<!-- ================= SUMMARY ================= -->
+
+<section class="card">
+
+<h2>🧠 The 30-Second Explanation</h2>
+
+
+<div class="flow">
+
+<div class="node">
+1
+<br>
+Calibrate
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+2
+<br>
+Guard
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+3
+<br>
+Evaluate
+</div>
+
+<div class="arrow">→</div>
+
+<div class="node">
+4
+<br>
+Diagnose
+</div>
+
+</div>
+
+
+<p class="center">
+
+<b>
+“Can I retrieve the right evidence?
+Can I know when I don't have enough evidence?
+And can I catch claims that are not grounded?”
+</b>
+
+</p>
+
+</section>
+
+
+<footer>
+
+Day 4 — Safety, Guardrails & Internal Evaluation
+
+</footer>
+
+</div>
+
+
+<script>
+
+/*
+    Animate score bars when they become visible.
+*/
+
+const bars = document.querySelectorAll(".fill");
+
+const observer = new IntersectionObserver(
+    entries => {
+
+        entries.forEach(entry => {
+
+            if (entry.isIntersecting) {
+
+                const width =
+                    entry.target.dataset.width;
+
+                entry.target.style.width = width;
+
+                observer.unobserve(entry.target);
+            }
+
+        });
+
+    },
+    {
+        threshold: 0.3
+    }
+);
+
+
+bars.forEach(bar => observer.observe(bar));
+
+
+/*
+    Highlight the currently visible section
+    in the navigation.
+*/
+
+const sections =
+    document.querySelectorAll("section[id]");
+
+const links =
+    document.querySelectorAll(".nav a");
+
+window.addEventListener("scroll", () => {
+
+    let current = "";
+
+    sections.forEach(section => {
+
+        const top =
+            section.getBoundingClientRect().top;
+
+        if (top <= 150) {
+            current = section.id;
+        }
+
+    });
+
+    links.forEach(link => {
+
+        link.style.background = "";
+
+        if (
+            link.getAttribute("href")
+            === "#" + current
+        ) {
+            link.style.background = "#203154";
+        }
+
+    });
+
+});
+
+</script>
+
+</body>
+</html>

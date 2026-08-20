@@ -1,5 +1,6 @@
 # Environment & Private Keys
 .env
+.streamlit/secrets.toml
 
 # Local Chroma Database (Built dynamically on Cloud / Local startup)
 chroma_db/
